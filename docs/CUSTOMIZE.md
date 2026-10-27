@@ -74,7 +74,7 @@ Each is a stock model wrapped with a context size; see `ollama\*.Modelfile`.
 
 ## What she's allowed to touch
 
-- **Folders she may look in / move files in:** Settings → Hands → *Folders she may touch*.
+- **Folders she may look in / move files in:** Settings → Hands → *Folders she may touch*. She reads files inside them freely; reading anything outside asks you first. Password stores, SSH keys and `.env` files are never opened.
 - **File moves and PowerShell changes** always ask you first; set *Ask before running* to `always` to be asked
   about read-only commands too, or switch PowerShell off.
 - **Screen:** *Notice which app is open* (window titles, local only) and *Allow screen peeks* (screenshot → local

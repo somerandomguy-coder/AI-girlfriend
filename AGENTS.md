@@ -48,7 +48,7 @@ changes, and explain what you changed in plain words.
 
 ```powershell
 npx tsc --noEmit -p .
-npx tsx scripts/repair-test.ts; npx tsx scripts/shell-test.ts; npx tsx scripts/markdown-test.ts; npx tsx scripts/needs-test.ts
+npx tsx scripts/repair-test.ts; npx tsx scripts/shell-test.ts; npx tsx scripts/markdown-test.ts; npx tsx scripts/needs-test.ts; npx tsx scripts/files-test.ts
 node scripts/check-sprites.mjs <sprite folder>          # after sprite changes
 node --check src/app/renderer/pet.js                    # after renderer JS changes
 $env:MAI_HOME="$env:TEMP\mai-e2e"; npx tsx scripts/e2e.ts   # after brain/prompt/tool changes (needs Ollama running)

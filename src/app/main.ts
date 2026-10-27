@@ -197,13 +197,17 @@ function hidePet(): void {
 function wireBrain(): void {
 	brain.approver = async (req) => {
 		pet?.show();
-		const what = req.kind === "powershell" ? "PowerShell command" : "file move";
+		const text = {
+			powershell: { what: "PowerShell command", all: "commands", note: "Only allow this if you understand what it does." },
+			move_file: { what: "file move", all: "moves", note: "Nothing moves unless you allow it." },
+			read_file: { what: "reading a file", all: "reads", note: "She'll see this file's content." },
+		}[req.kind];
 		const r = await dialog.showMessageBox({
 			type: req.kind === "powershell" ? "warning" : "question",
-			title: `Mai is asking permission: ${what}`,
+			title: `Mai is asking permission: ${text.what}`,
 			message: `${req.summary}\n\n“${req.why}”`,
-			detail: `${req.detail}\n\n${req.kind === "powershell" ? "Only allow this if you understand what it does." : "Nothing moves unless you allow it."}`,
-			buttons: ["Allow once", `Allow all ${req.kind === "powershell" ? "commands" : "moves"} for this request`, "Deny"],
+			detail: `${req.detail}\n\n${text.note}`,
+			buttons: ["Allow once", `Allow all ${text.all} for this request`, "Deny"],
 			defaultId: 2,
 			cancelId: 2,
 			noLink: true,

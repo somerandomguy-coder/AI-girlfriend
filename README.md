@@ -77,6 +77,7 @@ Options: `setup.cmd -CheckOnly` (report only), `-Profile 16gb` (force a profile)
 | Use a different AI model | [docs/CUSTOMIZE.md](docs/CUSTOMIZE.md#models) |
 | Fix something that isn't working | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) |
 | Understand / change the code | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| See what she can't do yet, and the plans | [docs/ROADMAP.md](docs/ROADMAP.md) |
 
 **Using an AI coding assistant?** Open this folder in Claude Code, pi, Codex or Cursor and just ask, e.g.
 *"make her a cheerful little sister instead"* or *"check my sprite folder is set up right"*.
@@ -97,19 +98,20 @@ Options: `setup.cmd -CheckOnly` (report only), `-Profile 16gb` (force a profile)
   - **VoxCPM2:** style-prompted emotion for big GPUs.
   - **Online fallback:** if a local voice is down, she uses the edge voice.
   - Speech starts sentence by sentence while she's still typing.
-- **Tools.** 21 of them:
+- **Tools.** 22 of them:
   - memory and persona edits
   - calendar, todos and side quests (with automatic checks)
   - screen peek with the local vision model (opt-in)
   - system info and a "which model fits my GPU" cookbook
-  - files and PowerShell (behind your approval)
+  - reading files (PDF, Word, Excel, PowerPoint, images, code…)
+  - moving files and PowerShell (behind your approval)
 
 ## Developer quick reference
 
 ```powershell
 npm start               # build + run the desktop pet
 npm run tui             # same brain in the terminal (/poke /feed /todos /needs /history …)
-npx tsx scripts/repair-test.ts; npx tsx scripts/shell-test.ts; npx tsx scripts/markdown-test.ts; npx tsx scripts/needs-test.ts
+npx tsx scripts/repair-test.ts; npx tsx scripts/shell-test.ts; npx tsx scripts/markdown-test.ts; npx tsx scripts/needs-test.ts; npx tsx scripts/files-test.ts
 $env:MAI_HOME="$env:TEMP\mai-e2e"; npx tsx scripts/e2e.ts      # real-model scenarios in a throwaway profile
 npx electron scripts/screenshots/capture.cjs                   # regenerate docs/images
 ```

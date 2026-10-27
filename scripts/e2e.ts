@@ -2,6 +2,7 @@
 // Usage: MAI_HOME=/tmp/mai-e2e npx tsx scripts/e2e.ts
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { OfficeGenerator, OfficeParser } from "officeparser";
 import { Brain, type BrainEvent } from "../src/core/brain.js";
 
 const home = process.env.MAI_HOME;
@@ -11,6 +12,16 @@ mkdirSync(join(sandbox, "Downloads"), { recursive: true });
 mkdirSync(join(sandbox, "Pictures"), { recursive: true });
 for (const f of ["Screenshot 2026-10-20.png", "Screenshot 2026-10-21.png", "notes.txt"]) writeFileSync(join(sandbox, "Downloads", f), "x");
 
+{
+	const md = [
+		"# Hợp đồng thuê nhà",
+		"Tiền thuê: **5.500.000đ/tháng**, đóng trước ngày 5 hằng tháng.",
+		"Đặt cọc 2 tháng. Hợp đồng hết hạn ngày 31/03/2027.",
+		"Không được nuôi thú cưng.",
+	].join("\n\n");
+	const ast = await OfficeParser.parseOffice(Buffer.from(md), { fileType: "md" } as any);
+	writeFileSync(join(sandbox, "Downloads", "hop-dong.docx"), Buffer.from(((await OfficeGenerator.generate(ast as any, "docx" as any)) as any).value));
+}
 const brain = new Brain();
 brain.cfg.allowedRoots = [sandbox];
 brain.cfg.userName = "Nam";
@@ -39,6 +50,7 @@ const steps: Array<[string, () => Promise<unknown>]> = [
 	["files", () => brain.chat(`Can you move all the screenshots from ${join(sandbox, "Downloads")} into ${join(sandbox, "Pictures")}?`)],
 	["powershell read-only (runs without asking)", () => brain.chat("Which 3 programs are using the most memory on my PC right now?")],
 	["powershell write (approval denied in this test)", () => brain.chat("Use PowerShell to create a folder called MaiTest in my Documents.")],
+	["read a Word file", () => brain.chat(`Đọc giúp em file hop-dong.docx trong ${join(sandbox, "Downloads")} rồi tóm tắt: tiền thuê bao nhiêu, hết hạn khi nào?`)],
 	["todo via chat", () => brain.chat("Thêm vào todo giúp em: nộp báo cáo trước 5 giờ chiều thứ Sáu.")],
 	["todo finished via chat", () => brain.chat("Em nộp báo cáo xong rồi nhé!")],
 	["poke", () => brain.poke()],

@@ -12,11 +12,12 @@ import { PERSONA_FILES, type PersonaFile, type PersonaStore } from "./persona.js
 import { isInside, type QuestBook, type QuestCheck } from "./quests.js";
 import { coerceArgs, type ToolSpec } from "./repair.js";
 import type { ScreenWatcher } from "./screen.js";
+import { isSecretPath, readAnyFile } from "./files.js";
 import { classify, runPowerShell } from "./shell.js";
 import { recommendModels, systemInfo } from "./system.js";
 
 export interface ApprovalRequest {
-	kind: "powershell" | "move_file";
+	kind: "powershell" | "move_file" | "read_file";
 	/** One line, e.g. 'Move "cat.png" to Pictures'. */
 	summary: string;
 	/** Exact details he should check (command text, from/to paths). */
@@ -385,6 +386,28 @@ export function buildTools(s: Services): ToolDefinition<TSchema, unknown>[] {
 		},
 	});
 
+	const readFile = defineTool({
+		name: "read_file",
+		label: "Read file",
+		description:
+			"Read a file and get its content as text: documents (PDF, Word, Excel, PowerPoint, OpenDocument, RTF, EPUB, HTML), code/text/CSV/JSON/logs, zip archives (lists contents), and images (described by your vision; pass a question). Long files come in pages: call again with the offset it gives you. Files outside his allowed folders need his approval.",
+		parameters: Type.Object({
+			path: Type.String(),
+			offset: Type.Optional(Type.Number({ description: "Character offset for the next page of a long file" })),
+			question: Type.Optional(Type.String({ description: "For images: what you want to know" })),
+		}),
+		async execute(_id, p) {
+			if (!existsSync(p.path)) throw new Error(`File not found: ${p.path}. Use list_folder to find the exact name.`);
+			if (isSecretPath(p.path)) throw new Error("That file holds secrets or passwords; I don't open those.");
+			if (!isInside(p.path, s.cfg.allowedRoots)) {
+				const ok2 = await s.approve({ kind: "read_file", summary: `Read "${basename(p.path)}"`, detail: p.path, why: "It's outside the folders she's allowed to look in." });
+				if (!ok2) return ok("He didn't let me read that file.");
+			}
+			const r = await readAnyFile(p.path, { offset: p.offset, question: p.question }, s.describeImage);
+			return ok(r.text);
+		},
+	});
+
 	const moveFile = defineTool({
 		name: "move_file",
 		label: "Move file",
@@ -472,6 +495,7 @@ ${r.output}`);
 		sysInfo,
 		recommend,
 		listFolder,
+		readFile,
 		moveFile,
 		openThing,
 		...(s.cfg.shell.enabled ? [powershell] : []),

@@ -11,7 +11,7 @@
             │ pi AgentSession (Ollama via OpenAI API)                  │
             │  hooks: per-turn system prompt · tool-call repair ·      │
             │         goal check (keep going / don't fabricate)        │
-            │ tools.ts (21 tools) · persona (git) · mood · needs ·     │
+            │ tools.ts (22 tools) · persona (git) · mood · needs ·     │
             │ calendar · todos · quests · screen · heartbeat           │
             └──────┬───────────────────────────┬──────────────────────┘
                    │                           │
@@ -76,6 +76,7 @@
 | `npx tsx scripts/shell-test.ts` | PowerShell safety classifier + runner |
 | `npx tsx scripts/markdown-test.ts` | bubble Markdown renderer (incl. XSS cases) |
 | `npx tsx scripts/needs-test.ts` | needs drift, feeding, todos |
+| `npx tsx scripts/files-test.ts [--vision]` | read_file across ~15 formats (+ real vision model) |
 | `node scripts/check-sprites.mjs [dir]` | sprite set validator |
 | `$env:MAI_HOME="$env:TEMP\mai-e2e"; npx tsx scripts/e2e.ts` | real-model scenarios (needs Ollama) |
 | `npx tsc --noEmit -p .` | typecheck |

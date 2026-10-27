@@ -17,7 +17,7 @@ const TOOL_LABEL = {
   look_at_screen: "peeking at your screen 👀", system_info: "checking your PC", recommend_models: "consulting the cookbook",
   list_folder: "digging through folders", move_file: "moving files", open: "opening it",
   todo_add: "writing your todo", todo_list: "checking your todos", todo_complete: "ticking it off", todo_remove: "crossing it out",
-  adjust_needs: "having feelings", run_powershell: "running a command",
+  adjust_needs: "having feelings", run_powershell: "running a command", read_file: "reading your file 📄",
 };
 
 let sprite = null;

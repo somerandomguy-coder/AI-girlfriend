@@ -16,12 +16,15 @@
   "dependencies": {
     "@earendil-works/pi-ai": "^1.4.0",
     "@earendil-works/pi-coding-agent": "^1.4.0",
+    "fflate": "^0.8.3",
     "jsonrepair": "^3.15.0",
-    "msedge-tts": "^2.1.1"
+    "msedge-tts": "^2.1.1",
+    "officeparser": "^8.3.0"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
     "electron": "^45.0.0",
+    "pdf-lib": "^1.17.1",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   }
