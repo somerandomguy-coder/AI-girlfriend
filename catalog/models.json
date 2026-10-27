@@ -1,0 +1,17 @@
+{
+  "_note": "Curated local models for the cookbook. Ollama tags change; verify on ollama.com/library before pulling. paramsB = total params, activeB = active params per token (MoE).",
+  "models": [
+    { "tag": "qwen3.5:4b", "paramsB": 4.7, "activeB": 4.7, "uses": ["chat", "tools", "vision"], "langs": "201 languages incl. vi", "notes": "Fast helper / heartbeat brain." },
+    { "tag": "qwen3.5:9b", "paramsB": 9.6, "activeB": 9.6, "uses": ["chat", "tools", "vision"], "langs": "201 languages incl. vi", "notes": "Best all-round pick for 12-16 GB cards." },
+    { "tag": "gemma4:12b", "paramsB": 11.9, "activeB": 11.9, "uses": ["chat", "tools", "vision", "audio"], "langs": "140+ languages incl. vi", "notes": "Vision + audio input; good persona writing." },
+    { "tag": "gemma4:26b-a4b-it-qat", "paramsB": 26, "activeB": 3.8, "uses": ["chat", "tools", "vision"], "langs": "140+ languages incl. vi", "notes": "MoE: big-model quality at small-model speed. Great for 24-32 GB." },
+    { "tag": "qwen3.5:35b-a3b", "paramsB": 35, "activeB": 3, "uses": ["chat", "tools", "vision", "agent"], "langs": "201 languages incl. vi", "notes": "MoE agent model; fast, needs ~22 GB at Q4." },
+    { "tag": "qwen3.6:27b", "paramsB": 27, "activeB": 27, "uses": ["chat", "tools", "agent", "code"], "langs": "multilingual incl. vi", "notes": "Strongest tool use here, but dense = slower." },
+    { "tag": "llama3.1:8b", "paramsB": 8, "activeB": 8, "uses": ["chat", "tools"], "langs": "weak vi", "notes": "Legacy; prefer qwen3.5/gemma4." }
+  ],
+  "gpuBandwidthGBs": {
+    "RTX 5090": 1792, "RTX 5080": 960, "RTX 5070 Ti": 896, "RTX 5070": 672, "RTX 5060 Ti": 448, "RTX 5060": 448,
+    "RTX 4090": 1008, "RTX 4080": 717, "RTX 4070 Ti": 504, "RTX 4070": 504, "RTX 4060 Ti": 288, "RTX 4060": 272,
+    "RTX 3090": 936, "RTX 3080": 760, "RTX 3070": 448, "RTX 3060": 360
+  }
+}

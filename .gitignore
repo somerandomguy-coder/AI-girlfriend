@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.smoke/
+data/
+sidecars/needle/.venv/
+*.log
+sidecars/audiocpp/bin/
+sidecars/audiocpp/models/
+sidecars/audiocpp/dl/

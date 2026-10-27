@@ -1,0 +1,28 @@
+{
+  "name": "mai-companion",
+  "version": "0.1.0",
+  "description": "Local-first desktop companion: a bossy, caring AI who lives on your desktop, built on the pi agent SDK + Ollama.",
+  "private": true,
+  "type": "module",
+  "main": "dist/app/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "npm run build && electron .",
+    "tui": "tsx src/tui.ts",
+    "smoke": "tsx scripts/smoke.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "e2e": "tsx scripts/e2e.ts"
+  },
+  "dependencies": {
+    "@earendil-works/pi-ai": "^1.4.0",
+    "@earendil-works/pi-coding-agent": "^1.4.0",
+    "jsonrepair": "^3.15.0",
+    "msedge-tts": "^2.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "electron": "^45.0.0",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}

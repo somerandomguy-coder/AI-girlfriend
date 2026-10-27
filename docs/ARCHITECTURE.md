@@ -1,0 +1,81 @@
+# Architecture
+
+```
+            ┌──────────── Electron main (src/app/main.ts) ────────────┐
+ pet window │  roam.ts: roam/chat modes, wandering, drag & drop       │  settings window
+ (renderer) │  speech queue → TTS → audio chunks to the pet           │  (persona, history,
+  pet.js  ◄─┤  approvals (dialogs), tray, hotkey, IPC                 ├─► config, look)
+            └──────────────┬──────────────────────────────────────────┘
+                           │ events
+            ┌──────────────▼────────── Brain (src/core/brain.ts) ─────┐
+            │ pi AgentSession (Ollama via OpenAI API)                  │
+            │  hooks: per-turn system prompt · tool-call repair ·      │
+            │         goal check (keep going / don't fabricate)        │
+            │ tools.ts (21 tools) · persona (git) · mood · needs ·     │
+            │ calendar · todos · quests · screen · heartbeat           │
+            └──────┬───────────────────────────┬──────────────────────┘
+                   │                           │
+           Ollama :11434              sidecars (sidecars.ts)
+           mai-brain / mai-helper     ├ Python :8765  needle repair + sea-g2p phonemizer
+                                      └ audio.cpp :8080  VieNeu (+ VoxCPM2)
+```
+
+`src/core` has no Electron imports, so the same brain runs in the terminal (`src/tui.ts`) and in the tests.
+
+## A turn
+
+1. **He types.** `Brain.chat()` adds a timestamp and language hint, then `session.prompt()`.
+2. **`before_agent_start`** rebuilds the system prompt (`prompt.ts`) from:
+   - SOUL / USER / MEMORY / HEARTBEAT;
+   - a "Right now" block: time, 7-day dates, mood, needs, screen, calendar, quests, todos.
+3. **The model streams.** Text deltas go to the bubble, and finished sentences become `utterance` events. The
+   main process synthesizes them in order and the pet plays them back to back.
+4. **`message_end`.** If the model wrote a tool call as *text*, `repair.ts` turns it back into a real one, using
+   `jsonrepair` first and the needle sidecar as fallback.
+5. **Tools run.** `move_file` and non-read-only `run_powershell` go through `Services.approve()`. The renderer
+   shows a dialog; the answer is Allow once / Allow all for this request / Deny.
+6. **`agent_before_settle`.** The run is checked before it ends:
+   - if she said nothing, she's told to answer;
+   - if she promised work she didn't do, or stated facts without the tool that checks them, the small model
+     judges and she's nudged to continue (at most `agent.maxAutoContinues`).
+
+## Proactive behaviour (`heartbeat.ts`)
+
+- **Every minute:**
+  - needs tick, and the model keep-warm ping;
+  - due reminders, then auto-verified quests;
+  - "welcome back" after being idle.
+- **Every N minutes:** gather signals and wake her with a `[HEARTBEAT]` message. She answers `SILENT` if there's
+  nothing worth saying. Signals include:
+  - first run, late night, long app sessions;
+  - overdue honor quests and overdue todos;
+  - urgent needs;
+  - a random "spontaneous" moment.
+- Daily cap and quiet hours apply.
+
+## Where to change things
+
+| Change | File |
+|---|---|
+| Add a tool | `src/core/tools.ts` (`defineTool`, add to the returned list; give it a label in `TOOL_LABEL` in `pet.js`) |
+| A new need / tweak rates | `src/core/needs.ts` |
+| Prompt structure | `src/core/prompt.ts` |
+| Proactive signals | `src/core/heartbeat.ts` |
+| Voice engines / mood delivery | `src/core/tts.ts`, server config in `src/core/sidecars.ts` |
+| Roaming / window modes | `src/app/roam.ts` |
+| Pet UI | `src/app/renderer/pet.{html,css,js}` (no build step; plain JS) |
+| Settings UI | `src/app/renderer/settings.{html,css,js}` (fields in `FIELDS`) |
+| Config defaults | `src/core/config.ts` |
+| Setup steps | `setup.ps1`, `scripts/setup-vieneu.ps1` |
+
+## Tests
+
+| Command | What |
+|---|---|
+| `npx tsx scripts/repair-test.ts` | tool-call repair, mood tags, sentence chunking |
+| `npx tsx scripts/shell-test.ts` | PowerShell safety classifier + runner |
+| `npx tsx scripts/markdown-test.ts` | bubble Markdown renderer (incl. XSS cases) |
+| `npx tsx scripts/needs-test.ts` | needs drift, feeding, todos |
+| `node scripts/check-sprites.mjs [dir]` | sprite set validator |
+| `$env:MAI_HOME="$env:TEMP\mai-e2e"; npx tsx scripts/e2e.ts` | real-model scenarios (needs Ollama) |
+| `npx tsc --noEmit -p .` | typecheck |

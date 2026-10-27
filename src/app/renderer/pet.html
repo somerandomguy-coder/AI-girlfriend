@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' file: data:; media-src blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+<title>Mai</title>
+<link rel="stylesheet" href="pet.css">
+</head>
+<body>
+  <main id="stage">
+    <section id="talk">
+      <div id="bubble" class="hidden" aria-live="polite">
+        <div id="bubble-text"></div>
+        <div id="bubble-meta"></div>
+      </div>
+      <div id="log" aria-label="Chat history"></div>
+      <div id="planner" aria-label="Planner">
+        <h2>📋 Todos</h2>
+        <form id="todo-form" autocomplete="off">
+          <input id="todo-new" placeholder="Add a todo… (Enter)" maxlength="200">
+        </form>
+        <ul id="todo-list"></ul>
+        <h2>📅 Coming up (7 days)</h2>
+        <ul id="event-list"></ul>
+        <p class="planner-hint">Ask her to add events ("remind me to call mom tomorrow 8pm"). Finishing todos feeds her 🍙.</p>
+      </div>
+      <div id="activity" class="hidden"></div>
+    </section>
+
+    <section id="body">
+      <div id="mood-badge" title="mood"></div>
+      <img id="avatar" alt="Mai" draggable="false">
+      <div id="hearts" aria-label="affection"></div>
+      <div id="needs" aria-label="Her needs"></div>
+    </section>
+
+    <section id="controls">
+      <form id="say-form" autocomplete="off">
+        <textarea id="say" rows="1" placeholder="Talk to her…" title="Enter to send · Shift+Enter for a new line" maxlength="4000"></textarea>
+        <button type="submit" title="Send">➤</button>
+      </form>
+      <nav id="toolbar">
+        <button id="btn-log" title="Chat history">🗨</button>
+        <button id="btn-planner" title="Todos & calendar">📅</button>
+        <button id="btn-feed" title="Feed her">🍙</button>
+        <button id="btn-mute" title="Mute voice">🔊</button>
+        <button id="btn-wake" title="Poke her (she always reacts; don't spam it)">👉</button>
+        <button id="btn-settings" title="Settings, persona & history">⚙</button>
+        <button id="btn-hide" title="Shrink to a small head (click her to bring her back)">—</button>
+      </nav>
+    </section>
+  </main>
+  <script src="markdown.js"></script>
+  <script src="pet.js"></script>
+</body>
+</html>

@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'">
+<title>Mai — Settings</title>
+<link rel="stylesheet" href="settings.css">
+</head>
+<body>
+  <header>
+    <h1>Mai</h1>
+    <nav role="tablist">
+      <button role="tab" data-tab="persona" aria-selected="true">Persona</button>
+      <button role="tab" data-tab="history">History &amp; rollback</button>
+      <button role="tab" data-tab="config">Settings</button>
+      <button role="tab" data-tab="sprites">Look</button>
+    </nav>
+  </header>
+
+  <main>
+    <section id="tab-persona" class="tab">
+      <p class="hint">These files are her. Edit them directly; every save is a version you can roll back. She edits them too, and those edits also show up in History.</p>
+      <div class="file-tabs" id="persona-file-tabs"></div>
+      <textarea id="persona-editor" spellcheck="false" aria-label="Persona file"></textarea>
+      <div class="row"><button id="persona-save" class="primary">Save version</button><span id="persona-status" class="status"></span></div>
+    </section>
+
+    <section id="tab-history" class="tab" hidden>
+      <p class="hint">Every change to her personality and memory, newest first. Restoring an old version keeps the full history.</p>
+      <div class="split">
+        <ol id="history-list"></ol>
+        <div>
+          <pre id="history-diff">Pick a version to see what changed.</pre>
+          <div class="row"><button id="history-restore" disabled>Restore this version</button><span id="history-status" class="status"></span></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-config" class="tab" hidden>
+      <form id="config-form"></form>
+      <div class="row"><button id="config-save" class="primary">Save settings</button><span id="config-status" class="status"></span></div>
+    </section>
+
+    <section id="tab-sprites" class="tab" hidden>
+      <p class="hint">A sprite set is a folder with a <code>sprite.json</code> plus PNG frames. Copy <code>sprites/aza</code>, swap the images, and drop the folder into your sprites folder.</p>
+      <label>Sprite set <select id="sprite-select"></select></label>
+      <div class="row"><button id="sprite-save" class="primary">Use this look</button><button id="open-sprites">Open sprites folder</button><button id="open-data">Open data folder</button><span id="sprite-status" class="status"></span></div>
+    </section>
+  </main>
+  <script src="settings.js"></script>
+</body>
+</html>

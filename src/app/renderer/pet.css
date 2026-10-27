@@ -1,0 +1,154 @@
+:root {
+  --ink: #2a1f2d;
+  --paper: #fff7fb;
+  --pink: #ff8fb8;
+  --pink-deep: #e0578a;
+  --line: rgba(42, 31, 45, 0.14);
+  --muted: #8a7690;
+  --shadow: 0 6px 24px rgba(60, 20, 50, 0.22);
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; height: 100%; overflow: hidden;
+  background: transparent;
+  font: 14px/1.45 "Segoe UI", system-ui, sans-serif;
+  color: var(--ink);
+  user-select: none;
+}
+#stage { height: 100%; display: flex; flex-direction: column; justify-content: flex-end; padding: 8px 10px 6px; gap: 4px; }
+
+#talk { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; min-height: 0; gap: 6px; }
+/* The bubble and history take whatever height is free above her; long text scrolls inside. */
+#bubble {
+  position: relative; align-self: stretch;
+  display: flex; flex-direction: column; min-height: 0; flex: 0 1 auto;
+  background: var(--paper); border: 2px solid var(--ink); border-radius: 16px;
+  padding: 10px 12px 6px; box-shadow: var(--shadow);
+  user-select: text;
+  transition: opacity .35s ease, transform .35s ease;
+}
+#bubble::after {
+  content: ""; position: absolute; left: 50%; bottom: -10px; width: 16px; height: 16px;
+  background: var(--paper); border-right: 2px solid var(--ink); border-bottom: 2px solid var(--ink);
+  transform: translateX(-50%) rotate(45deg);
+}
+#bubble.proactive { border-color: var(--pink-deep); }
+#bubble-text { word-wrap: break-word; min-height: 0; overflow-y: auto; font-size: 15px; line-height: 1.5; scrollbar-width: thin; scrollbar-color: var(--pink) transparent; }
+/* Markdown inside bubbles and history */
+#bubble-text p, .line p { margin: 0; }
+.md-gap { height: .5em; }
+.md-h { font-weight: 700; }
+#bubble-text ul, #bubble-text ol, .line ul, .line ol { margin: 2px 0; padding-left: 20px; }
+#bubble-text li, .line li { margin: 1px 0; }
+#bubble-text strong, .line strong { color: var(--pink-deep); }
+code { font: 12px Consolas, "Cascadia Mono", monospace; background: rgba(42, 31, 45, .08); padding: 0 4px; border-radius: 4px; }
+pre { margin: 4px 0; padding: 6px 8px; background: rgba(42, 31, 45, .08); border-radius: 8px; overflow-x: auto; white-space: pre-wrap; }
+pre code { background: none; padding: 0; }
+blockquote { margin: 2px 0; padding-left: 8px; border-left: 3px solid var(--pink); color: var(--muted); }
+.md-link { color: var(--pink-deep); cursor: pointer; }
+#bubble-meta { margin-top: 4px; font-size: 11px; color: var(--muted); text-align: right; }
+.hidden { opacity: 0; pointer-events: none; transform: translateY(6px); }
+#log.hidden, #activity.hidden { display: none; }
+
+#log {
+  background: var(--paper); border: 2px solid var(--ink); border-radius: 14px; box-shadow: var(--shadow);
+  overflow-y: auto; min-height: 0; flex: 0 1 auto; padding: 8px; user-select: text;
+  scrollbar-width: thin; scrollbar-color: var(--pink) transparent;
+}
+.line { margin: 4px 0; padding: 6px 9px; border-radius: 10px; max-width: 88%; word-wrap: break-word; }
+.line.me { white-space: pre-wrap; }
+.line.me { margin-left: auto; background: #ece4f3; }
+.line.mai { background: #ffe3ee; }
+.line small { display: block; color: var(--muted); font-size: 10px; }
+
+#activity {
+  align-self: center; font-size: 12px; color: #fff; background: rgba(42, 31, 45, .75);
+  padding: 2px 10px; border-radius: 999px;
+}
+
+#body { position: relative; display: flex; justify-content: center; height: 220px; flex-shrink: 0; }
+#avatar { height: 100%; cursor: grab; image-rendering: pixelated; filter: drop-shadow(0 4px 8px rgba(0,0,0,.25)); }
+#avatar.smooth { image-rendering: auto; }
+#mood-badge {
+  position: absolute; top: 6px; right: 70px; font-size: 26px;
+  transition: transform .3s ease, opacity .3s ease; opacity: 0;
+}
+#mood-badge.show { opacity: 1; animation: bob 1.6s ease-in-out infinite; }
+@keyframes bob { 50% { transform: translateY(-6px); } }
+#hearts { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); font-size: 11px; color: var(--pink-deep); letter-spacing: 1px; text-shadow: 0 0 4px #fff; }
+
+#controls { opacity: .35; transition: opacity .2s; flex-shrink: 0; }
+#stage:hover #controls, #controls:focus-within { opacity: 1; }
+#say-form { display: flex; gap: 4px; align-items: flex-end; }
+#say {
+  flex: 1; border: 2px solid var(--ink); border-radius: 12px; padding: 7px 10px;
+  background: var(--paper); color: var(--ink); font: inherit; outline: none;
+  resize: none; min-height: 38px; max-height: 140px; overflow-y: auto; line-height: 1.4;
+  scrollbar-width: thin; scrollbar-color: var(--pink) transparent;
+}
+#say-form button[type=submit] { height: 38px; }
+#say:focus { border-color: var(--pink-deep); }
+button {
+  border: 2px solid var(--ink); background: var(--paper); color: var(--ink);
+  border-radius: 10px; font: inherit; cursor: pointer; min-width: 34px; padding: 4px 8px;
+}
+button:hover { background: #ffe3ee; }
+button:focus-visible, #say:focus-visible { outline: 3px solid var(--pink); outline-offset: 1px; }
+#toolbar { display: flex; justify-content: center; gap: 6px; margin-top: 5px; }
+#toolbar button { font-size: 13px; padding: 2px 6px; }
+.error { color: #b3261e; }
+
+/* ---------- panels: the bubble, chat history and planner share the space above her ---------- */
+#log, #planner { display: none; }
+#talk[data-panel="log"] #log, #talk[data-panel="planner"] #planner { display: block; }
+#talk[data-panel="log"] #bubble, #talk[data-panel="planner"] #bubble { display: none; }
+
+#planner {
+  background: var(--paper); border: 2px solid var(--ink); border-radius: 14px; box-shadow: var(--shadow);
+  overflow-y: auto; min-height: 0; flex: 0 1 auto; padding: 8px 10px; user-select: text;
+  scrollbar-width: thin; scrollbar-color: var(--pink) transparent;
+}
+#planner h2 { font-size: 13px; margin: 4px 0 6px; }
+#planner ul { list-style: none; margin: 0 0 8px; padding: 0; }
+#planner li { display: flex; align-items: center; gap: 6px; padding: 4px 2px; border-bottom: 1px dashed var(--line); }
+#planner li:last-child { border-bottom: 0; }
+#planner li .title { flex: 1; word-break: break-word; }
+#planner li.done .title { text-decoration: line-through; color: var(--muted); }
+#planner li .chip { font-size: 11px; padding: 0 6px; border-radius: 999px; background: #ece4f3; white-space: nowrap; }
+#planner li .chip.overdue { background: #fde0e0; color: #b3261e; }
+#planner li .by-mai { color: var(--pink-deep); font-size: 11px; }
+#planner li .x { min-width: 0; border: 0; background: none; color: var(--muted); padding: 0 4px; font-size: 14px; }
+#planner li .x:hover { color: #b3261e; background: none; }
+#planner input[type=checkbox] { accent-color: var(--pink-deep); width: 16px; height: 16px; }
+#todo-new { width: 100%; border: 2px solid var(--line); border-radius: 10px; padding: 5px 8px; font: inherit; background: #fff; color: var(--ink); margin-bottom: 6px; }
+#todo-new:focus { outline: none; border-color: var(--pink-deep); }
+#planner .empty { color: var(--muted); font-size: 12px; border: 0; }
+#planner .day { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; border: 0; padding-top: 6px; }
+.planner-hint { font-size: 11px; color: var(--muted); margin: 4px 0 0; }
+
+/* ---------- needs: small "good when full" bars beside her ---------- */
+#needs { position: absolute; left: 4px; bottom: 16px; display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
+.need { display: flex; align-items: center; gap: 3px; }
+.need .bar { width: 46px; height: 6px; border-radius: 4px; background: rgba(42, 31, 45, .18); overflow: hidden; }
+.need .bar i { display: block; height: 100%; background: var(--pink-deep); transition: width .6s ease; }
+.need.low .bar i { background: #e2742d; }
+.need.low { animation: nudge 2.4s ease-in-out infinite; }
+@keyframes nudge { 50% { transform: translateX(2px); } }
+
+/* ---------- roam mode: just her, living on the desktop (see src/app/roam.ts) ---------- */
+body.mode-roam #talk, body.mode-roam #controls, body.mode-roam #needs, body.mode-roam #hearts { display: none; }
+body.mode-roam #stage { padding: 0; justify-content: flex-end; }
+body.mode-roam #body { height: 100% !important; }
+body.mode-roam #avatar { cursor: pointer; }
+body.mode-roam #mood-badge { right: 18px; top: 6px; font-size: 22px; }
+#avatar { transition: transform .15s ease; transform-origin: 50% 100%; }
+body.facing-right #avatar { transform: scaleX(-1); }
+/* Sprite sets without walk frames still look like she's walking: a little bounce in her step. */
+body.walking #avatar { animation: walk-bob .42s ease-in-out infinite; }
+body.walking.facing-right #avatar { animation-name: walk-bob-r; }
+@keyframes walk-bob { 50% { transform: translateY(-5px) rotate(-2deg); } }
+@keyframes walk-bob-r { 0%, 100% { transform: scaleX(-1); } 50% { transform: scaleX(-1) translateY(-5px) rotate(-2deg); } }
+/* Picked up: she dangles. Falling: a squash when she lands is handled by the next idle frame. */
+body.held #avatar { animation: dangle .7s ease-in-out infinite; transform-origin: 50% 0%; }
+@keyframes dangle { 0%, 100% { transform: rotate(-7deg); } 50% { transform: rotate(7deg); } }
+body.falling #avatar { transform: scaleY(1.04); }
