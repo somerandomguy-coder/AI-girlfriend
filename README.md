@@ -75,6 +75,7 @@ Options: `setup.cmd -CheckOnly` (report only), `-Profile 16gb` (force a profile)
 | Draw / generate your own character sprites | [docs/SPRITES.md](docs/SPRITES.md) |
 | Change her voice, or clone a voice | [docs/CUSTOMIZE.md](docs/CUSTOMIZE.md#voice) |
 | Use a different AI model | [docs/CUSTOMIZE.md](docs/CUSTOMIZE.md#models) |
+| Update to the newest version | [docs/UPDATE.md](docs/UPDATE.md) |
 | Fix something that isn't working | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) |
 | Understand / change the code | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | See what she can't do yet, and the plans | [docs/ROADMAP.md](docs/ROADMAP.md) |
