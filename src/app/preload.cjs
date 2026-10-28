@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld("mai", {
 	history: () => ipcRenderer.invoke("chat-history"),
 	clearChat: () => ipcRenderer.invoke("clear-chat"),
 	onChatCleared: (cb) => ipcRenderer.on("chat-cleared", () => cb()),
+	transcribe: (args) => ipcRenderer.invoke("transcribe-audio", args),
 	openSettings: () => ipcRenderer.invoke("open-settings"),
 	setMuted: (m) => ipcRenderer.invoke("set-muted", m),
 	wake: () => ipcRenderer.invoke("wake"),

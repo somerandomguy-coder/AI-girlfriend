@@ -396,6 +396,156 @@ sayBox.addEventListener("keydown", (ev) => {
   }
 });
 
+// ---------- Speech to Text (STT) (Vietnamese priority, English supported) ----------
+const btnMic = $("btn-mic");
+let recognition = null;
+let isRecording = false;
+let mediaRecorder = null;
+let audioStream = null;
+let audioChunks = [];
+let micLang = "vi-VN"; // Priority Vietnamese
+
+function updateMicUi(recording) {
+  isRecording = recording;
+  if (!btnMic) return;
+  btnMic.classList.toggle("recording", recording);
+  btnMic.textContent = recording ? "⏹️" : "🎙️";
+  btnMic.title = recording
+    ? "Recording (" + (micLang === "vi-VN" ? "Tiếng Việt" : "English") + ")… Click to finish"
+    : "Voice typing (" + (micLang === "vi-VN" ? "Tiếng Việt" : "English") + ") · Right-click to switch language";
+  if (recording) {
+    sayBox.placeholder = "Listening (" + (micLang === "vi-VN" ? "Tiếng Việt" : "English") + ")…";
+  } else {
+    sayBox.placeholder = "Talk to her…";
+  }
+}
+
+async function stopSTT() {
+  if (recognition) {
+    try { recognition.stop(); } catch {}
+  }
+  if (mediaRecorder && mediaRecorder.state !== "inactive") {
+    try { mediaRecorder.stop(); } catch {}
+  }
+  if (audioStream) {
+    audioStream.getTracks().forEach((t) => t.stop());
+    audioStream = null;
+  }
+  updateMicUi(false);
+}
+
+async function startSTT() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (SpeechRecognition) {
+    try {
+      recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = micLang;
+
+      recognition.onresult = (event) => {
+        let text = "";
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          text += event.results[i][0].transcript;
+        }
+        if (text.trim()) {
+          sayBox.value = text.trim();
+          growInput();
+        }
+      };
+
+      recognition.onerror = async (event) => {
+        console.warn("SpeechRecognition error:", event.error);
+        if (event.error === "not-allowed") {
+          stopSTT();
+          showBubble("Microphone access was denied.", { meta: "mic" });
+        } else {
+          // Fall back to MediaRecorder audio recording and backend transcription
+          await startMediaRecorder();
+        }
+      };
+
+      recognition.onend = () => {
+        updateMicUi(false);
+        if (sayBox.value.trim()) sayBox.focus();
+      };
+
+      updateMicUi(true);
+      recognition.start();
+      return;
+    } catch (e) {
+      console.warn("SpeechRecognition start failed, falling back to MediaRecorder:", e);
+    }
+  }
+  await startMediaRecorder();
+}
+
+async function startMediaRecorder() {
+  try {
+    audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    audioChunks = [];
+    const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+      ? "audio/webm;codecs=opus"
+      : MediaRecorder.isTypeSupported("audio/ogg")
+        ? "audio/ogg"
+        : "audio/webm";
+    mediaRecorder = new MediaRecorder(audioStream, { mimeType });
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) audioChunks.push(e.data);
+    };
+    mediaRecorder.onstop = async () => {
+      if (audioStream) {
+        audioStream.getTracks().forEach((t) => t.stop());
+        audioStream = null;
+      }
+      if (!audioChunks.length) {
+        updateMicUi(false);
+        return;
+      }
+      const blob = new Blob(audioChunks, { type: mimeType });
+      const arrayBuffer = await blob.arrayBuffer();
+      const buffer = Array.from(new Uint8Array(arrayBuffer));
+      sayBox.placeholder = "Transcribing voice…";
+      try {
+        const text = await window.mai.transcribe({ buffer, mimeType: blob.type, lang: micLang === "vi-VN" ? "vi" : "en" });
+        if (text && text.trim()) {
+          sayBox.value = (sayBox.value ? sayBox.value + " " : "") + text.trim();
+          growInput();
+          sayBox.focus();
+        } else {
+          showBubble("Could not detect speech. Try speaking closer to the microphone.", { meta: "mic" });
+        }
+      } catch (err) {
+        showBubble("Transcription error: " + err.message, { meta: "stt error" });
+      } finally {
+        updateMicUi(false);
+      }
+    };
+    updateMicUi(true);
+    mediaRecorder.start();
+  } catch (err) {
+    updateMicUi(false);
+    showBubble("Microphone error: " + err.message, { meta: "mic error" });
+  }
+}
+
+if (btnMic) {
+  btnMic.addEventListener("click", () => {
+    if (isRecording) {
+      stopSTT();
+    } else {
+      startSTT();
+    }
+  });
+  // Right-click to switch between Tiếng Việt (priority default) and English
+  btnMic.addEventListener("contextmenu", (ev) => {
+    ev.preventDefault();
+    micLang = micLang === "vi-VN" ? "en-US" : "vi-VN";
+    btnMic.title = "Voice typing (" + (micLang === "vi-VN" ? "Tiếng Việt" : "English") + ") · Right-click to switch language";
+    showBubble("Switched voice input to: " + (micLang === "vi-VN" ? "Tiếng Việt 🇻🇳" : "English 🇬🇧"), { meta: "language" });
+  });
+}
+
 // ---------- click-through: empty, transparent parts of the window don't block the desktop ----------
 let clickThrough = null;
 let dragging = null;

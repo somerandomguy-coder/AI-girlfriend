@@ -8,6 +8,7 @@ import { Heartbeat } from "../core/heartbeat.js";
 import { APP_ROOT, paths } from "../core/paths.js";
 import { PERSONA_FILES, type PersonaFile } from "../core/persona.js";
 import { vieneuVoices } from "../core/sidecars.js";
+import { transcribeAudio } from "../core/stt.js";
 import { Speaker } from "../core/tts.js";
 import { ROAM_SIZE, Roamer } from "./roam.js";
 
@@ -250,6 +251,14 @@ function registerIpc(): void {
 		settingsWin?.webContents.send("chat-cleared");
 		return { ok: true };
 	});
+	ipcMain.handle("transcribe-audio", async (_e, payload: { buffer: number[]; mimeType: string; lang?: "vi" | "en" }) => {
+		try {
+			const buf = Buffer.from(payload.buffer);
+			return await transcribeAudio(buf, payload.mimeType, brain.cfg, { lang: payload.lang ?? "vi" });
+		} catch {
+			return "";
+		}
+	});
 	ipcMain.handle("sprite", () => {
 		const dir = spriteDir(brain.cfg.spriteSet);
 		return { base: `${pathToFileURL(dir).href}/`, manifest: JSON.parse(readFileSync(join(dir, "sprite.json"), "utf8")) };
@@ -338,5 +347,8 @@ app.on("will-quit", () => {
 	roamer?.stop();
 	globalShortcut.unregisterAll();
 	heartbeat.stop();
+	brain.dispose();
+});
+app.on("before-quit", () => {
 	brain.dispose();
 });

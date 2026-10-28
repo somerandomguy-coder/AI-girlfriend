@@ -30,13 +30,28 @@ export interface Quest {
 
 const FILE = () => join(paths.state, "quests.json");
 
+export function normalizePath(p: string): string {
+	if (!p) return "";
+	let s = String(p).trim().replace(/^["']|["']$/g, "").trim();
+	s = s.replace(/\//g, "\\");
+	if (/^[a-zA-Z]:\\?$/.test(s)) {
+		return s.slice(0, 2).toLowerCase() + "\\";
+	}
+	s = s.replace(/\\+$/, "");
+	return s.toLowerCase();
+}
+
 export function isInside(p: string, roots: string[]): boolean {
 	if (!p || !roots || !roots.length) return false;
-	const clean = (s: string) => resolve(s.trim().replace(/^["']|["']$/g, "")).toLowerCase();
-	const full = clean(p);
+	const full = normalizePath(p);
+	if (!full) return false;
 	return roots.some((r) => {
-		const root = clean(r);
-		return full === root || full.startsWith(root + "\\") || full.startsWith(root + "/");
+		if (!r) return false;
+		const root = normalizePath(r);
+		if (!root) return false;
+		if (full === root) return true;
+		const prefix = root.endsWith("\\") ? root : root + "\\";
+		return full.startsWith(prefix);
 	});
 }
 

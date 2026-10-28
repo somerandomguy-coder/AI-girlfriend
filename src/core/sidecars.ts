@@ -1,4 +1,4 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Config } from "./config.js";
@@ -51,6 +51,7 @@ async function up(url: string): Promise<boolean> {
 export class Sidecars {
 	private python?: ChildProcess;
 	private audio?: ChildProcess;
+	private audioStartedByUs = false;
 	notes: string[] = [];
 
 	constructor(private readonly cfg: Config) {}
@@ -88,8 +89,8 @@ export class Sidecars {
 					backend: this.cfg.tts.vieneu.backend,
 					device: 0,
 					threads: this.cfg.tts.vieneu.threads,
-					lazy_load: false,
-					max_loaded_models: 2,
+					lazy_load: true,
+					max_loaded_models: 1,
 					ui: true,
 					ui_management: false,
 					models: [
@@ -101,8 +102,8 @@ export class Sidecars {
 							mode: "offline",
 							default_request_options: voice,
 						},
-						...(existsSync(VOXCPM2)
-							? [{ id: "voxcpm2", family: "voxcpm2", path: toPosix(VOXCPM2), task: "tts", mode: "offline", lazy: this.cfg.tts.engine !== "voxcpm2" }]
+						...(this.cfg.tts.engine === "voxcpm2" && existsSync(VOXCPM2)
+							? [{ id: "voxcpm2", family: "voxcpm2", path: toPosix(VOXCPM2), task: "tts", mode: "offline", lazy: true }]
 							: []),
 					],
 				},
@@ -122,6 +123,7 @@ export class Sidecars {
 			return;
 		}
 		const config = this.writeServerConfig();
+		this.audioStartedByUs = true;
 		this.audio = spawn(exe, ["--config", config, "--log", "--log-file", join(paths.state, "audiocpp-server.log")], {
 			cwd: join(AUDIOCPP, "bin"),
 			windowsHide: true,
@@ -146,8 +148,36 @@ export class Sidecars {
 		}
 	}
 
+	static killAllAudioServers(): void {
+		if (process.platform === "win32") {
+			try {
+				execFile("taskkill.exe", ["/F", "/IM", "audiocpp_server.exe", "/T"], { windowsHide: true }, () => {});
+				execFile("taskkill.exe", ["/F", "/IM", "llama-server.exe", "/T"], { windowsHide: true }, () => {});
+			} catch {}
+		}
+	}
+
 	dispose(): void {
-		this.python?.kill();
-		this.audio?.kill();
+		if (this.python?.pid) {
+			if (process.platform === "win32") {
+				try {
+					execFile("taskkill.exe", ["/pid", String(this.python.pid), "/T", "/F"], { windowsHide: true }, () => {});
+				} catch {}
+			} else {
+				this.python.kill();
+			}
+		}
+		if (this.audio?.pid) {
+			if (process.platform === "win32") {
+				try {
+					execFile("taskkill.exe", ["/pid", String(this.audio.pid), "/T", "/F"], { windowsHide: true }, () => {});
+				} catch {}
+			} else {
+				this.audio.kill();
+			}
+		}
+		if (this.audioStartedByUs) {
+			Sidecars.killAllAudioServers();
+		}
 	}
 }

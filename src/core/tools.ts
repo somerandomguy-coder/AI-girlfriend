@@ -374,21 +374,24 @@ export function buildTools(s: Services): ToolDefinition<TSchema, unknown>[] {
 				throw new Error(`Folder not found: ${targetPath}`);
 			}
 			const re = p.pattern ? new RegExp(`^${p.pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")}$`, "i") : null;
-			const items = readdirSync(targetPath, { withFileTypes: true })
-				.filter((d) => !re || re.test(d.name))
+			const all = readdirSync(targetPath, { withFileTypes: true }).filter((d) => !re || re.test(d.name));
+			const total = all.length;
+			const maxScan = Math.min(Math.max(p.limit ?? 30, 30), 100);
+			const entries = all.length > maxScan * 2 ? all.slice(0, maxScan * 2) : all;
+			const items = entries
 				.map((d) => {
-					const full = join(targetPath, d.name);
-					let st;
+					let sizeKB = 0;
+					let modified = "";
 					try {
-						st = statSync(full);
-					} catch {
-						return null;
-					}
-					return { name: d.name, dir: d.isDirectory(), sizeKB: Math.round(st.size / 1024), modified: st.mtime.toISOString().slice(0, 16) };
+						const st = statSync(join(targetPath, d.name));
+						sizeKB = Math.round(st.size / 1024);
+						modified = st.mtime.toISOString().slice(0, 16);
+					} catch {}
+					return { name: d.name, dir: d.isDirectory(), sizeKB, modified };
 				})
-				.filter((x): x is NonNullable<typeof x> => !!x)
-				.sort((a, b) => b.modified.localeCompare(a.modified));
-			return json({ path: targetPath, total: items.length, items: items.slice(0, p.limit ?? 30) });
+				.sort((a, b) => (b.modified || "").localeCompare(a.modified || ""))
+				.slice(0, p.limit ?? 30);
+			return json({ path: targetPath, total, items });
 		},
 	});
 
@@ -405,6 +408,13 @@ export function buildTools(s: Services): ToolDefinition<TSchema, unknown>[] {
 		async execute(_id, p) {
 			const targetPath = p.path.trim().replace(/^["']|["']$/g, "");
 			if (!existsSync(targetPath)) throw new Error(`File not found: ${targetPath}. Use list_folder to find the exact name.`);
+			try {
+				if (statSync(targetPath).isDirectory()) {
+					throw new Error(`"${targetPath}" is a folder, not a file. Use list_folder to list its files.`);
+				}
+			} catch (e: any) {
+				if (e.message?.includes("is a folder")) throw e;
+			}
 			if (isSecretPath(targetPath)) throw new Error("That file holds secrets or passwords; I don't open those.");
 			if (!isInside(targetPath, s.cfg.allowedRoots)) {
 				const ok2 = await s.approve({ kind: "read_file", summary: `Read "${basename(targetPath)}"`, detail: targetPath, why: "It's outside the folders she's allowed to look in." });
