@@ -27,6 +27,41 @@ export function gpus(): GpuInfo[] {
 				return { name, vramTotalGB: +(+total / 1024).toFixed(1), vramUsedGB: +(+used / 1024).toFixed(1), utilPct: +util };
 			});
 	} catch {
+		if (process.platform === "win32") {
+			try {
+				const script = `
+					$adapters = Get-ItemProperty 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}\\*' -ErrorAction SilentlyContinue | Where-Object { $_.DriverDesc -and $_.DriverDesc -notmatch 'Basic Render|Virtual|Remote|RDP' };
+					$list = foreach ($a in $adapters) {
+						$name = if ($a.DriverDesc) { $a.DriverDesc } else { $a.'HardwareInformation.AdapterString' };
+						$bytes = 0;
+						if ($a.'HardwareInformation.qwMemorySize') { $bytes = [int64]$a.'HardwareInformation.qwMemorySize' }
+						elseif ($a.'HardwareInformation.MemorySize') { $bytes = [int64]$a.'HardwareInformation.MemorySize' };
+						if ($name -and $bytes -gt 0) { "$name,$([math]::Round($bytes / 1073741824, 1)),0,0" }
+					};
+					if (-not $list) {
+						$vc = Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch 'Basic|Virtual|Remote' } | Sort-Object AdapterRAM -Descending | Select-Object -First 1;
+						if ($vc) { "$($vc.Name),$([math]::Max(1, [math]::Round($vc.AdapterRAM / 1073741824, 1))),0,0" }
+					} else {
+						$list -join [Environment]::NewLine
+					}
+				`;
+				const out = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script], {
+					encoding: "utf8",
+					windowsHide: true,
+					timeout: 8000,
+				});
+				return out
+					.trim()
+					.split("\n")
+					.filter((l) => l.includes(","))
+					.map((l) => {
+						const [name, total, used, util] = l.split(",").map((s) => s.trim());
+						return { name, vramTotalGB: +total, vramUsedGB: +used, utilPct: +util };
+					});
+			} catch {
+				return [];
+			}
+		}
 		return [];
 	}
 }

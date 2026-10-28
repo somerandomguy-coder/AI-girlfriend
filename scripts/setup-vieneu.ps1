@@ -44,7 +44,7 @@ foreach ($v in $Voices) {
 
 if ($Expressive) {
   Write-Host "2b/3 VoxCPM2 (q8_0, 2.96 GB) for expressive voice"
-  $vox = Join-Path $ac "modelsoxcpm2"
+  $vox = Join-Path $ac "models\voxcpm2"
   New-Item -ItemType Directory -Force $vox | Out-Null
   Get-File "https://huggingface.co/audio-cpp/audio.cpp-gguf/resolve/main/VoxCPM2-GGUF/voxcpm2-q8_0.gguf" (Join-Path $vox "voxcpm2-q8_0.gguf")
 }

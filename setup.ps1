@@ -16,7 +16,8 @@ param(
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 $Root = $PSScriptRoot
-$DataDir = Join-Path $env:USERPROFILE ".mai-companion"
+$UserHome = if ($env:USERPROFILE) { $env:USERPROFILE } else { $env:HOME }
+$DataDir = Join-Path $UserHome ".mai-companion"
 $script:Missing = 0
 
 function Say($tag, $msg, $color = "Gray") { Write-Host ("  [{0,-5}] {1}" -f $tag, $msg) -ForegroundColor $color }
@@ -27,23 +28,115 @@ function Fail($msg) { Say "fail" $msg "Red"; throw $msg }
 
 function Refresh-Path {
 	$env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
+	$extraPaths = @()
+	if ($env:ProgramFiles) {
+		$extraPaths += (Join-Path $env:ProgramFiles "nodejs")
+		$extraPaths += (Join-Path $env:ProgramFiles "Git\cmd")
+	}
+	if ($env:LOCALAPPDATA) {
+		$extraPaths += (Join-Path $env:LOCALAPPDATA "Programs\Ollama")
+		$extraPaths += (Join-Path $env:LOCALAPPDATA "Programs\nodejs")
+		$extraPaths += (Join-Path $env:LOCALAPPDATA "Programs\Git\cmd")
+	}
+	if ($UserHome) {
+		$extraPaths += (Join-Path $UserHome ".local\bin")
+		$extraPaths += (Join-Path $UserHome ".cargo\bin")
+		$extraPaths += (Join-Path $UserHome ".mai-companion\tools\node")
+		$extraPaths += (Join-Path $UserHome ".mai-companion\tools\git\cmd")
+	}
+	foreach ($p in $extraPaths) {
+		if ((Test-Path $p) -and ($env:Path -notlike "*$p*")) {
+			$env:Path = "$p;$env:Path"
+		}
+	}
 }
+Refresh-Path
 function Has($cmd) { [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
 
 function Winget-Install($id, $name) {
-	if (-not (Has "winget")) { Fail "winget is missing. Install 'App Installer' from the Microsoft Store, then run setup again." }
+	if (-not (Has "winget")) { return $false }
 	Say "..." "installing $name (winget $id)"
 	winget install --id $id -e --silent --accept-package-agreements --accept-source-agreements --scope user 2>$null | Out-Null
-	if ($LASTEXITCODE -ne 0) { winget install --id $id -e --silent --accept-package-agreements --accept-source-agreements | Out-Null }
+	if ($LASTEXITCODE -ne 0) { winget install --id $id -e --silent --accept-package-agreements --accept-source-agreements 2>$null | Out-Null }
+	Refresh-Path
+	return $true
+}
+
+function Install-Node-Direct {
+	Say "..." "downloading standalone Node.js 22 (no admin needed)..."
+	$toolsDir = Join-Path $DataDir "tools"
+	New-Item -ItemType Directory -Force $toolsDir | Out-Null
+	$nodeDir = Join-Path $toolsDir "node"
+	$zip = Join-Path $toolsDir "node.zip"
+	$tmp = Join-Path $toolsDir "node_tmp"
+	$url = "https://nodejs.org/dist/v22.14.0/node-v22.14.0-win-x64.zip"
+	try {
+		Invoke-WebRequest -Uri $url -OutFile $zip
+		Expand-Archive -Path $zip -DestinationPath $tmp -Force
+		$inner = (Get-ChildItem $tmp | Where-Object { $_.PSIsContainer } | Select-Object -First 1).FullName
+		if (Test-Path $nodeDir) { Remove-Item -Path $nodeDir -Recurse -Force -ErrorAction SilentlyContinue }
+		Move-Item -Path $inner -Destination $nodeDir -Force
+		Remove-Item -Path $tmp -Recurse -Force -ErrorAction SilentlyContinue
+		Remove-Item -Path $zip -Force -ErrorAction SilentlyContinue
+		$env:Path = "$nodeDir;$env:Path"
+		Refresh-Path
+	} catch {
+		Say "warn" "direct Node.js download failed: $_" "DarkYellow"
+	}
+}
+
+function Install-Git-Direct {
+	Say "..." "downloading standalone MinGit (no admin needed)..."
+	$toolsDir = Join-Path $DataDir "tools"
+	New-Item -ItemType Directory -Force $toolsDir | Out-Null
+	$gitDir = Join-Path $toolsDir "git"
+	$zip = Join-Path $toolsDir "git.zip"
+	$url = "https://github.com/git-for-windows/git/releases/download/v2.48.1.windows.1/MinGit-2.48.1-64-bit.zip"
+	try {
+		Invoke-WebRequest -Uri $url -OutFile $zip
+		New-Item -ItemType Directory -Force $gitDir | Out-Null
+		Expand-Archive -Path $zip -DestinationPath $gitDir -Force
+		Remove-Item -Path $zip -Force -ErrorAction SilentlyContinue
+		$cmdPath = Join-Path $gitDir "cmd"
+		$env:Path = "$cmdPath;$env:Path"
+		Refresh-Path
+	} catch {
+		Say "warn" "direct Git download failed: $_" "DarkYellow"
+	}
+}
+
+function Install-Uv-Direct {
+	Say "..." "installing uv..."
+	try {
+		Invoke-RestMethod "https://astral.sh/uv/install.ps1" | Invoke-Expression
+	} catch {}
 	Refresh-Path
 }
 
-function Need-Tool($cmd, $wingetId, $name, [scriptblock]$versionOk = { $true }) {
+function Install-Ollama-Direct {
+	Say "..." "downloading Ollama installer..."
+	$installer = Join-Path $env:TEMP "OllamaSetup.exe"
+	try {
+		Invoke-WebRequest -Uri "https://ollama.com/download/OllamaSetup.exe" -OutFile $installer
+		Say "..." "launching Ollama installer..."
+		Start-Process $installer -Wait
+		Refresh-Path
+	} catch {
+		Say "warn" "Ollama installer download failed: $_" "DarkYellow"
+	}
+}
+
+function Need-Tool($cmd, $wingetId, $name, [scriptblock]$versionOk = { $true }, [scriptblock]$fallback = $null) {
 	if ((Has $cmd) -and (& $versionOk)) { Ok "$name"; return }
 	Todo "$name"
 	if (-not $CheckOnly) {
-		Winget-Install $wingetId $name
-		if (-not (Has $cmd)) { Fail "$name installed but '$cmd' is not on PATH yet. Close this window, open a new one, and run setup again." }
+		Winget-Install $wingetId $name | Out-Null
+		if (-not ((Has $cmd) -and (& $versionOk)) -and $fallback) {
+			& $fallback
+		}
+		if (-not ((Has $cmd) -and (& $versionOk))) {
+			Fail "$name could not be found or installed automatically. Please install $name manually and run setup again."
+		}
 		Ok "$name installed"
 	}
 }
@@ -54,19 +147,69 @@ Write-Host "  repo: $Root"
 
 # ---------------------------------------------------------------- tools
 Step "Tools"
-Need-Tool "git" "Git.Git" "Git (her memory is versioned with git)"
-Need-Tool "node" "OpenJS.NodeJS.LTS" "Node.js 22+" { [int]((node -v) -replace "^v(\d+).*", '$1') -ge 22 }
-Need-Tool "ollama" "Ollama.Ollama" "Ollama (runs the AI models)"
-Need-Tool "uv" "astral-sh.uv" "uv (Python for the helper sidecar)"
+Need-Tool "git" "Git.Git" "Git (her memory is versioned with git)" { $true } { Install-Git-Direct }
+Need-Tool "node" "OpenJS.NodeJS.LTS" "Node.js 22+" { [int]((node -v) -replace "^v(\d+).*", '$1') -ge 22 } { Install-Node-Direct }
+Need-Tool "ollama" "Ollama.Ollama" "Ollama (runs the AI models)" { $true } { Install-Ollama-Direct }
+Need-Tool "uv" "astral-sh.uv" "uv (Python for the helper sidecar)" { $true } { Install-Uv-Direct }
 
 # ---------------------------------------------------------------- hardware -> model profile
 Step "Hardware"
 $vram = 0
 $gpu = "none"
+$isNvidia = $false
+
 if (Has "nvidia-smi") {
-	$line = (nvidia-smi --query-gpu=name,memory.total --format=csv,noheader,nounits | Select-Object -First 1)
-	if ($line) { $gpu, $mem = $line.Split(",") | ForEach-Object { $_.Trim() }; $vram = [math]::Round([int]$mem / 1024) }
+	try {
+		$line = (nvidia-smi --query-gpu=name,memory.total --format=csv,noheader,nounits 2>$null | Select-Object -First 1)
+		if ($line) {
+			$gpu, $mem = $line.Split(",") | ForEach-Object { $_.Trim() }
+			$vram = [math]::Round([int]$mem / 1024)
+			$isNvidia = $true
+		}
+	} catch {}
 }
+
+if ($gpu -eq "none" -or $vram -eq 0) {
+	try {
+		$regPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}\*"
+		$adapters = Get-ItemProperty -Path $regPath -ErrorAction SilentlyContinue | Where-Object {
+			$_.DriverDesc -and $_.DriverDesc -notmatch "Basic Render|Virtual|Remote|RDP"
+		}
+		$best = $null
+		$maxMem = [int64]0
+		foreach ($a in $adapters) {
+			$bytes = [int64]0
+			if ($a."HardwareInformation.qwMemorySize") {
+				$bytes = [int64]$a."HardwareInformation.qwMemorySize"
+			} elseif ($a."HardwareInformation.MemorySize") {
+				$bytes = [int64]$a."HardwareInformation.MemorySize"
+			}
+			if ($bytes -gt $maxMem) {
+				$maxMem = $bytes
+				$best = $a
+			}
+		}
+		if ($best) {
+			$gpu = if ($best.DriverDesc) { $best.DriverDesc } else { $best."HardwareInformation.AdapterString" }
+			$vram = [math]::Round($maxMem / 1GB)
+			if ($gpu -match "NVIDIA") { $isNvidia = $true }
+		}
+	} catch {}
+}
+
+if ($gpu -eq "none" -or $vram -eq 0) {
+	try {
+		$vc = Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue |
+			Where-Object { $_.Name -notmatch "Basic|Virtual|Remote" } |
+			Sort-Object AdapterRAM -Descending | Select-Object -First 1
+		if ($vc) {
+			$gpu = $vc.Name
+			$vram = [math]::Max(1, [math]::Round($vc.AdapterRAM / 1GB))
+			if ($gpu -match "NVIDIA") { $isNvidia = $true }
+		}
+	} catch {}
+}
+
 if ($Profile -eq "auto") {
 	if ($vram -ge 24) { $Profile = "32gb" } elseif ($vram -ge 12) { $Profile = "16gb" } elseif ($vram -ge 7) { $Profile = "8gb" } else { $Profile = "cpu" }
 }
@@ -78,6 +221,19 @@ $profiles = @{
 	"cpu"  = @{ main = @("qwen3.5:4b"); helper = "qwen3.5:4b"; ctx = 8192; voiceCuda = $false }
 }
 $P = $profiles[$Profile]
+
+# ---------------------------------------------------------------- app
+Step "App (Node + Electron)"
+if (Test-Path (Join-Path $Root "node_modules\electron")) { Ok "npm packages" } else {
+	Todo "npm packages"
+	if (-not $CheckOnly) { Push-Location $Root; npm install --no-fund --no-audit; Pop-Location; Ok "npm packages installed" }
+}
+$dist = Join-Path $Root "dist\app\main.js"
+$newestSrc = (Get-ChildItem (Join-Path $Root "src") -Recurse -Filter *.ts | Sort-Object LastWriteTime -Descending | Select-Object -First 1).LastWriteTime
+if ((Test-Path $dist) -and ((Get-Item $dist).LastWriteTime -ge $newestSrc)) { Ok "build" } else {
+	Todo "build"
+	if (-not $CheckOnly) { Push-Location $Root; npm run build | Out-Null; Pop-Location; Ok "built" }
+}
 
 # ---------------------------------------------------------------- Ollama models
 Step "AI models (Ollama)"
@@ -120,19 +276,6 @@ foreach ($pair in @(@("mai-brain", $mainTag), @("mai-helper", $helperTag))) {
 	}
 }
 
-# ---------------------------------------------------------------- app
-Step "App (Node + Electron)"
-if (Test-Path (Join-Path $Root "node_modules\electron")) { Ok "npm packages" } else {
-	Todo "npm packages"
-	if (-not $CheckOnly) { Push-Location $Root; npm install --no-fund --no-audit; Pop-Location; Ok "npm packages installed" }
-}
-$dist = Join-Path $Root "dist\app\main.js"
-$newestSrc = (Get-ChildItem (Join-Path $Root "src") -Recurse -Filter *.ts | Sort-Object LastWriteTime -Descending | Select-Object -First 1).LastWriteTime
-if ((Test-Path $dist) -and ((Get-Item $dist).LastWriteTime -ge $newestSrc)) { Ok "build" } else {
-	Todo "build"
-	if (-not $CheckOnly) { Push-Location $Root; npm run build | Out-Null; Pop-Location; Ok "built" }
-}
-
 # ---------------------------------------------------------------- python sidecar
 Step "Helper sidecar (tool-call repair + Vietnamese phonemizer)"
 $side = Join-Path $Root "sidecars\needle"
@@ -154,9 +297,9 @@ if ($NoVoice) { Say "skip" "local voice (-NoVoice): she'll use the online edge v
 	$gguf = Join-Path $Root "sidecars\audiocpp\models\vieneu\vieneu-v3-turbo-q8_0.gguf"
 	$server = Join-Path $Root "sidecars\audiocpp\bin\audiocpp_server.exe"
 	$cudaDll = Join-Path $Root "sidecars\audiocpp\bin\ggml-cuda.dll"
-	$wantCuda = $P.voiceCuda
-	$voxFile = Join-Path $Root "sidecarsaudiocppmodelsoxcpm2oxcpm2-q8_0.gguf"
-	$wantVox = [bool]$P.expressive
+	$wantCuda = $P.voiceCuda -and $isNvidia
+	$voxFile = Join-Path $Root "sidecars\audiocpp\models\voxcpm2\voxcpm2-q8_0.gguf"
+	$wantVox = [bool]$P.expressive -and $isNvidia
 	if ((Test-Path $gguf) -and (Test-Path $server) -and ((-not $wantCuda) -or (Test-Path $cudaDll)) -and ((-not $wantVox) -or (Test-Path $voxFile))) { Ok "VieNeu-TTS + audio.cpp ($(if ($wantCuda) {'CUDA'} else {'CPU'}))" } else {
 		Todo "VieNeu-TTS + audio.cpp ($(if ($wantCuda) {'CUDA, ~850 MB'} else {'CPU, ~220 MB'}))$(if ($wantVox) {' + VoxCPM2 expressive voice (~3 GB)'})"
 		if (-not $CheckOnly) {
@@ -181,7 +324,7 @@ $ol = Ensure-Obj $cfg "ollama"
 Set-Val $ol "model" "mai-brain"; Set-Val $ol "smallModel" "mai-helper"; Set-Val $ol "contextWindow" $P.ctx
 $tts = Ensure-Obj $cfg "tts"
 Set-Val $tts "engine" $voiceEngine
-if ($voiceEngine -eq "vieneu") { $vn = Ensure-Obj $tts "vieneu"; Set-Val $vn "backend" $(if ($P.voiceCuda) { "cuda" } else { "cpu" }) }
+if ($voiceEngine -eq "vieneu") { $vn = Ensure-Obj $tts "vieneu"; Set-Val $vn "backend" $(if ($wantCuda) { "cuda" } else { "cpu" }) }
 if ($CheckOnly) { Ok "would write $cfgFile (model mai-brain, voice $voiceEngine)" } else {
 	# No BOM: Windows PowerShell 5.1 adds one with -Encoding utf8, and JSON parsers reject it.
 	[IO.File]::WriteAllText($cfgFile, ($cfg | ConvertTo-Json -Depth 10), (New-Object Text.UTF8Encoding $false))
@@ -191,7 +334,9 @@ if ($CheckOnly) { Ok "would write $cfgFile (model mai-brain, voice $voiceEngine)
 # ---------------------------------------------------------------- shortcuts
 Step "Shortcuts"
 $launcher = Join-Path $Root "start-mai.cmd"
-$lnk = Join-Path ([Environment]::GetFolderPath("Desktop")) "Mai.lnk"
+$desktop = [Environment]::GetFolderPath("Desktop")
+if (-not $desktop -and $UserHome) { $desktop = Join-Path $UserHome "Desktop" }
+$lnk = if ($desktop) { Join-Path $desktop "Mai.lnk" } else { "" }
 function Make-Shortcut($path) {
 	$sh = New-Object -ComObject WScript.Shell
 	$s = $sh.CreateShortcut($path)
@@ -202,9 +347,9 @@ function Make-Shortcut($path) {
 	$s.Description = "Mai, your desktop companion"
 	$s.Save()
 }
-if (Test-Path $lnk) { Ok "desktop shortcut" } else {
+if ($lnk -and (Test-Path $lnk)) { Ok "desktop shortcut" } else {
 	Todo "desktop shortcut 'Mai'"
-	if (-not $CheckOnly) { Make-Shortcut $lnk; Ok "desktop shortcut created" }
+	if (-not $CheckOnly -and $lnk) { Make-Shortcut $lnk; Ok "desktop shortcut created" }
 }
 if ($Autostart) {
 	$startup = Join-Path ([Environment]::GetFolderPath("Startup")) "Mai.lnk"
