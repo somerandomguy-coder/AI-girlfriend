@@ -31,8 +31,9 @@ export interface Quest {
 const FILE = () => join(paths.state, "quests.json");
 
 export function isInside(p: string, roots: string[]): boolean {
-	const full = resolve(p).toLowerCase();
-	return roots.some((r) => full.startsWith(resolve(r).toLowerCase()));
+	const clean = (s: string) => resolve(s.trim().replace(/^["']|["']$/g, "")).toLowerCase();
+	const full = clean(p);
+	return roots.some((r) => full.startsWith(clean(r)));
 }
 
 function globToRegex(pattern: string): RegExp {

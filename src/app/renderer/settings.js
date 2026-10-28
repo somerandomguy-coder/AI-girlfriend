@@ -184,7 +184,7 @@ async function loadConfig() {
 $("config-save").addEventListener("click", async () => {
   for (const el of $("config-form").querySelectorAll("[data-path]")) {
     const k = el.dataset.kind;
-    const v = k === "bool" ? el.checked : k === "number" ? Number(el.value) : k === "lines" ? el.value.split("\n").map((s) => s.trim()).filter(Boolean) : el.value;
+    const v = k === "bool" ? el.checked : k === "number" ? Number(el.value) : k === "lines" ? el.value.split("\n").map((s) => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean) : el.value;
     set(cfg, el.dataset.path, v);
   }
   const r = await window.mai.saveConfig(cfg);
