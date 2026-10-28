@@ -5,6 +5,7 @@ const bubble = $("bubble");
 const bubbleText = $("bubble-text");
 const bubbleMeta = $("bubble-meta");
 const logEl = $("log");
+const logLines = $("log-lines");
 const activity = $("activity");
 const badge = $("mood-badge");
 const hearts = $("hearts");
@@ -108,6 +109,8 @@ function scheduleHide(ms = 25000) {
   hideTimer = setTimeout(() => bubble.classList.add("hidden"), ms);
 }
 function addLog(line) {
+  const empty = logLines?.querySelector(".log-empty-hint");
+  if (empty) empty.remove();
   const div = document.createElement("div");
   div.className = `line ${line.role}`;
   if (line.role === "mai") div.innerHTML = window.renderMarkdown(line.text);
@@ -115,8 +118,9 @@ function addLog(line) {
   const small = document.createElement("small");
   small.textContent = `${new Date(line.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}${line.proactive ? " · on her own" : ""}`;
   div.prepend(small);
-  logEl.appendChild(div);
-  logEl.scrollTop = logEl.scrollHeight;
+  const target = logLines || logEl;
+  target.appendChild(div);
+  target.scrollTop = target.scrollHeight;
 }
 function setMood(m) {
   mood = m;
@@ -229,7 +233,10 @@ window.mai.onFocusInput(() => sayBox.focus());
 function setPanel(name) {
   const talk = $("talk");
   talk.dataset.panel = talk.dataset.panel === name ? "" : name || "";
-  if (talk.dataset.panel === "log") logEl.scrollTop = logEl.scrollHeight;
+  if (talk.dataset.panel === "log") {
+    const target = logLines || logEl;
+    target.scrollTop = target.scrollHeight;
+  }
   if (talk.dataset.panel === "planner") void renderPlanner();
 }
 $("btn-log").addEventListener("click", () => setPanel("log"));
@@ -450,6 +457,49 @@ document.addEventListener("click", (ev) => {
   window.mai.openLink(a.getAttribute("href"));
 });
 
+// ---------- clear chat / reset brain ----------
+let clearConfirmTimer = null;
+const btnClearChat = $("btn-clear-chat");
+if (btnClearChat) {
+  btnClearChat.addEventListener("click", async () => {
+    if (btnClearChat.dataset.confirm === "yes") {
+      clearTimeout(clearConfirmTimer);
+      delete btnClearChat.dataset.confirm;
+      btnClearChat.textContent = "Clearing…";
+      btnClearChat.disabled = true;
+      try {
+        await window.mai.clearChat();
+        const target = logLines || logEl;
+        target.replaceChildren();
+        const hint = document.createElement("div");
+        hint.className = "log-empty-hint";
+        hint.textContent = "Chat history cleared & brain reset.\nLong-term memories in MEMORY.md are kept safe.";
+        target.appendChild(hint);
+        showBubble("All clean! What are we working on now?", { meta: "brain reset" });
+      } finally {
+        btnClearChat.textContent = "🧹 Clean brain";
+        btnClearChat.disabled = false;
+      }
+      return;
+    }
+    btnClearChat.dataset.confirm = "yes";
+    btnClearChat.textContent = "Confirm reset?";
+    clearConfirmTimer = setTimeout(() => {
+      delete btnClearChat.dataset.confirm;
+      btnClearChat.textContent = "🧹 Clean brain";
+    }, 4000);
+  });
+}
+
+window.mai.onChatCleared?.(() => {
+  const target = logLines || logEl;
+  target.replaceChildren();
+  const hint = document.createElement("div");
+  hint.className = "log-empty-hint";
+  hint.textContent = "Chat history cleared & brain reset.\nLong-term memories in MEMORY.md are kept safe.";
+  target.appendChild(hint);
+});
+
 // ---------- boot ----------
 (async () => {
   const s = await window.mai.sprite();
@@ -458,7 +508,15 @@ document.addEventListener("click", (ev) => {
   if (sprite.size) document.getElementById("body").style.height = `${sprite.size}px`;
   avatar.classList.toggle("smooth", sprite.pixelated === false);
   refresh();
-  for (const line of await window.mai.history()) addLog(line);
+  const hist = await window.mai.history();
+  if (!hist.length) {
+    const hint = document.createElement("div");
+    hint.className = "log-empty-hint";
+    hint.textContent = "No messages yet. Say hi!\n(You can also ask her to remember things into MEMORY.md)";
+    (logLines || logEl).appendChild(hint);
+  } else {
+    for (const line of hist) addLog(line);
+  }
   const st = await window.mai.status();
   setHearts(st.mood.affection);
   if (st.needs) setNeeds(st.needs);

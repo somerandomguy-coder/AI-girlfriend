@@ -86,6 +86,23 @@ $("history-restore").addEventListener("click", async () => {
   loadPersona();
 });
 
+$("btn-settings-clear-chat")?.addEventListener("click", async () => {
+  const btn = $("btn-settings-clear-chat");
+  const status = $("settings-clear-status");
+  if (!confirm("Clear conversation history and reset her active brain session?\n\nFiles in MEMORY.md and persona will stay safe.")) return;
+  btn.disabled = true;
+  status.textContent = "Resetting…";
+  try {
+    await window.mai.clearChat();
+    status.textContent = "Done! Chat history cleared and brain reset.";
+    setTimeout(() => { status.textContent = ""; }, 5000);
+  } catch (err) {
+    status.textContent = `Error: ${err.message}`;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 // ---------- config ----------
 const FIELDS = [
   ["Brain", [

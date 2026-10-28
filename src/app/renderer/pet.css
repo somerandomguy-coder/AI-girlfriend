@@ -52,8 +52,28 @@ blockquote { margin: 2px 0; padding-left: 8px; border-left: 3px solid var(--pink
 
 #log {
   background: var(--paper); border: 2px solid var(--ink); border-radius: 14px; box-shadow: var(--shadow);
-  overflow-y: auto; min-height: 0; flex: 0 1 auto; padding: 8px; user-select: text;
+  min-height: 0; flex: 0 1 auto; padding: 8px; user-select: text;
+  flex-direction: column; max-height: 280px;
+}
+#log-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding-bottom: 4px; margin-bottom: 4px; border-bottom: 1px dashed var(--line);
+  font-size: 11px; font-weight: bold; color: var(--ink); flex-shrink: 0;
+}
+#btn-clear-chat {
+  font-size: 11px; padding: 1px 7px; border-radius: 6px; min-width: 0;
+  background: var(--paper); border: 1px solid var(--ink); cursor: pointer; transition: background .15s, color .15s;
+}
+#btn-clear-chat:hover { background: #ffe3ee; }
+#btn-clear-chat[data-confirm="yes"] {
+  background: #fde0e0; color: #b3261e; border-color: #b3261e; font-weight: bold;
+}
+#log-lines {
+  overflow-y: auto; flex: 1 1 auto; min-height: 0;
   scrollbar-width: thin; scrollbar-color: var(--pink) transparent;
+}
+.log-empty-hint {
+  font-size: 12px; color: var(--muted); text-align: center; padding: 16px 8px; line-height: 1.4; white-space: pre-line;
 }
 .line { margin: 4px 0; padding: 6px 9px; border-radius: 10px; max-width: 88%; word-wrap: break-word; }
 .line.me { white-space: pre-wrap; }
@@ -100,7 +120,8 @@ button:focus-visible, #say:focus-visible { outline: 3px solid var(--pink); outli
 
 /* ---------- panels: the bubble, chat history and planner share the space above her ---------- */
 #log, #planner { display: none; }
-#talk[data-panel="log"] #log, #talk[data-panel="planner"] #planner { display: block; }
+#talk[data-panel="log"] #log { display: flex; }
+#talk[data-panel="planner"] #planner { display: block; }
 #talk[data-panel="log"] #bubble, #talk[data-panel="planner"] #bubble { display: none; }
 
 #planner {

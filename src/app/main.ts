@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, screen, shell, Tray } from "electron";
@@ -44,6 +44,12 @@ app.on("second-instance", () => showPet());
 
 function logChat(line: ChatLine): void {
 	appendFileSync(CHAT_LOG, `${JSON.stringify(line)}\n`);
+}
+
+function clearChatLog(): void {
+	try {
+		writeFileSync(CHAT_LOG, "");
+	} catch {}
 }
 
 function recentChat(n = 60): ChatLine[] {
@@ -236,6 +242,14 @@ function registerIpc(): void {
 		await brain.chat(text);
 	});
 	ipcMain.handle("chat-history", () => recentChat());
+	ipcMain.handle("clear-chat", async () => {
+		clearChatLog();
+		stopSpeech();
+		await brain.resetSession();
+		pet?.webContents.send("chat-cleared");
+		settingsWin?.webContents.send("chat-cleared");
+		return { ok: true };
+	});
 	ipcMain.handle("sprite", () => {
 		const dir = spriteDir(brain.cfg.spriteSet);
 		return { base: `${pathToFileURL(dir).href}/`, manifest: JSON.parse(readFileSync(join(dir, "sprite.json"), "utf8")) };

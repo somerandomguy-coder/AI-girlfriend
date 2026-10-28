@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld("mai", {
 	sprite: () => ipcRenderer.invoke("sprite"),
 	status: () => ipcRenderer.invoke("status"),
 	history: () => ipcRenderer.invoke("chat-history"),
+	clearChat: () => ipcRenderer.invoke("clear-chat"),
+	onChatCleared: (cb) => ipcRenderer.on("chat-cleared", () => cb()),
 	openSettings: () => ipcRenderer.invoke("open-settings"),
 	setMuted: (m) => ipcRenderer.invoke("set-muted", m),
 	wake: () => ipcRenderer.invoke("wake"),

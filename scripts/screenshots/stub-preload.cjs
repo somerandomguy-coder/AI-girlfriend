@@ -30,6 +30,8 @@ window.mai = {
 		{ role: "me", text: "chị ơi em đói", ts: Date.now() - 600000 },
 		{ role: "mai", text: "Đói thì đi ăn đi, nhóc. **Ngay.**", ts: Date.now() - 590000 },
 	],
+	clearChat: async () => ({ ok: true }),
+	onChatCleared: () => {},
 	openSettings() {}, setMuted() {}, wake() {}, hide() {}, openLink() {}, setClickThrough() {}, moveBy() {}, setMode() {}, grab() {}, release() {},
 	feed() {}, todoAdd() {}, todoToggle() {}, todoRemove() {}, eventRemove() {},
 	planner: async () => ({

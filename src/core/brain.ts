@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { writeFileSync } from "node:fs";
+import { existsSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
 	type AgentSession,
@@ -127,6 +127,9 @@ export class Brain extends EventEmitter {
 	private run?: RunInfo;
 	private toolSpecs: ToolSpec[] = [];
 	private sidecars!: Sidecars;
+	private modelRuntime?: ModelRuntime;
+	private resourceLoader?: DefaultResourceLoader;
+	private customTools: any[] = [];
 	/**
 	 * Front ends set this to ask him about actions that change files or the system. Default: deny.
 	 * "all" grants that kind of action for the rest of the current request only.
@@ -240,15 +243,27 @@ export class Brain extends EventEmitter {
 		});
 		await resourceLoader.reload();
 
+		this.modelRuntime = modelRuntime;
+		this.resourceLoader = resourceLoader;
+		this.customTools = tools;
+		await this.initSession();
+		await this.warmUp();
+	}
+
+	private async initSession(): Promise<void> {
+		const o = this.cfg.ollama;
+		const model = this.modelRuntime?.getModel("ollama", o.model);
+		if (!model) throw new Error(`Model ${o.model} not configured`);
+
 		const { session } = await createAgentSession({
 			cwd: paths.data,
 			agentDir: paths.pi,
 			model,
 			thinkingLevel: "off",
-			modelRuntime,
-			resourceLoader,
+			modelRuntime: this.modelRuntime!,
+			resourceLoader: this.resourceLoader!,
 			noTools: "builtin",
-			customTools: tools,
+			customTools: this.customTools,
 			sessionManager: SessionManager.continueRecent(paths.data, paths.sessions),
 			settingsManager: SettingsManager.inMemory({
 				compaction: { enabled: true, reserveTokens: 2500, keepRecentTokens: 5000 },
@@ -258,7 +273,30 @@ export class Brain extends EventEmitter {
 		this.session = session;
 		await session.bindExtensions?.({});
 		this.wireEvents();
-		await this.warmUp();
+	}
+
+	/** Resets conversation context and active session files while preserving persistent persona / MEMORY.md. */
+	async resetSession(): Promise<void> {
+		if (this.session) {
+			try {
+				await this.session.abort();
+			} catch {}
+			try {
+				this.session.dispose();
+			} catch {}
+		}
+		if (existsSync(paths.sessions)) {
+			try {
+				for (const f of readdirSync(paths.sessions)) {
+					rmSync(join(paths.sessions, f), { recursive: true, force: true });
+				}
+			} catch {}
+		}
+		this.grants.clear();
+		this.run = undefined;
+		if (this.modelRuntime && this.resourceLoader) {
+			await this.initSession();
+		}
 	}
 
 	/** pi extension hooks: dynamic prompt, tool-call repair, and the don't-stop-halfway goal check. */
