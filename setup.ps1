@@ -5,11 +5,15 @@
 #   powershell -ExecutionPolicy Bypass -File setup.ps1               # set everything up
 #   powershell -ExecutionPolicy Bypass -File setup.ps1 -CheckOnly    # just report what's missing
 #   ... -Profile 32gb | 16gb | 8gb | cpu     force a model profile instead of detecting VRAM
+#   ... -Model <tag>  reuse an already downloaded Ollama model (e.g. -Model qwen3.5:4b)
+#   ... -SkipModels   reuse whatever models are already in Ollama without downloading
 #   ... -NoVoice      skip the local voice (she uses the online edge voice)
 #   ... -Autostart    also start Mai when Windows starts
 param(
 	[switch]$CheckOnly,
 	[ValidateSet("auto", "32gb", "16gb", "8gb", "cpu")][string]$Profile = "auto",
+	[string]$Model = "",
+	[switch]$SkipModels,
 	[switch]$NoVoice,
 	[switch]$Autostart
 )
@@ -246,9 +250,16 @@ if (-not $CheckOnly -and (Has "ollama") -and -not (Ollama-Up)) {
 }
 $have = @()
 if (Has "ollama") { $have = (ollama list 2>$null | Select-Object -Skip 1 | ForEach-Object { ($_ -split "\s+")[0] }) }
-function Pull-First($candidates) {
+function Pull-First($candidates, [switch]$AllowDownload = $true) {
 	foreach ($tag in $candidates) {
-		if ($have -contains $tag -or $have -contains "${tag}:latest") { Ok "model $tag"; return $tag }
+		if ($have -contains $tag -or $have -contains "${tag}:latest") { Ok "model $tag (reusing existing)"; return $tag }
+	}
+	if (-not $AllowDownload -or $SkipModels) {
+		$nonHelper = $have | Where-Object { $_ -notlike "mai-*" } | Select-Object -First 1
+		if ($nonHelper) {
+			Ok "reusing existing model: $nonHelper"
+			return $nonHelper
+		}
 	}
 	foreach ($tag in $candidates) {
 		Todo "model $tag (download; this is the big one, a few GB)"
@@ -259,8 +270,9 @@ function Pull-First($candidates) {
 	}
 	Fail "none of these models could be downloaded: $($candidates -join ', ')"
 }
-$mainTag = Pull-First $P.main
-$helperTag = Pull-First @($P.helper)
+$mainCandidates = if ($Model) { @($Model) } else { $P.main }
+$mainTag = Pull-First $mainCandidates -AllowDownload:(-not $SkipModels)
+$helperTag = Pull-First @($P.helper) -AllowDownload:(-not $SkipModels)
 # Wrap them with the context size Mai expects (cheap: no extra download).
 foreach ($pair in @(@("mai-brain", $mainTag), @("mai-helper", $helperTag))) {
 	$name, $from = $pair
