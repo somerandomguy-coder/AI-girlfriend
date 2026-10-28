@@ -130,6 +130,7 @@ export class Brain extends EventEmitter {
 	private modelRuntime?: ModelRuntime;
 	private resourceLoader?: DefaultResourceLoader;
 	private customTools: any[] = [];
+	private startPromise?: Promise<void>;
 	/**
 	 * Front ends set this to ask him about actions that change files or the system. Default: deny.
 	 * "all" grants that kind of action for the rest of the current request only.
@@ -179,7 +180,12 @@ export class Brain extends EventEmitter {
 		};
 	}
 
-	async start(): Promise<void> {
+	start(): Promise<void> {
+		this.startPromise = this.doStart();
+		return this.startPromise;
+	}
+
+	private async doStart(): Promise<void> {
 		this.persona.init();
 		this.mood = new MoodEngine();
 		this.calendar = new Calendar();
@@ -255,21 +261,49 @@ export class Brain extends EventEmitter {
 		const model = this.modelRuntime?.getModel("ollama", o.model);
 		if (!model) throw new Error(`Model ${o.model} not configured`);
 
-		const { session } = await createAgentSession({
-			cwd: paths.data,
-			agentDir: paths.pi,
-			model,
-			thinkingLevel: "off",
-			modelRuntime: this.modelRuntime!,
-			resourceLoader: this.resourceLoader!,
-			noTools: "builtin",
-			customTools: this.customTools,
-			sessionManager: SessionManager.continueRecent(paths.data, paths.sessions),
-			settingsManager: SettingsManager.inMemory({
-				compaction: { enabled: true, reserveTokens: 2500, keepRecentTokens: 5000 },
-				retry: { enabled: true, maxRetries: 4, baseDelayMs: 1500 },
-			}),
-		});
+		let session: AgentSession;
+		try {
+			const res = await createAgentSession({
+				cwd: paths.data,
+				agentDir: paths.pi,
+				model,
+				thinkingLevel: "off",
+				modelRuntime: this.modelRuntime!,
+				resourceLoader: this.resourceLoader!,
+				noTools: "builtin",
+				customTools: this.customTools,
+				sessionManager: SessionManager.continueRecent(paths.data, paths.sessions),
+				settingsManager: SettingsManager.inMemory({
+					compaction: { enabled: true, reserveTokens: 2500, keepRecentTokens: 5000 },
+					retry: { enabled: true, maxRetries: 4, baseDelayMs: 1500 },
+				}),
+			});
+			session = res.session;
+		} catch (err) {
+			try {
+				if (existsSync(paths.sessions)) {
+					for (const f of readdirSync(paths.sessions)) {
+						rmSync(join(paths.sessions, f), { recursive: true, force: true });
+					}
+				}
+			} catch {}
+			const res = await createAgentSession({
+				cwd: paths.data,
+				agentDir: paths.pi,
+				model,
+				thinkingLevel: "off",
+				modelRuntime: this.modelRuntime!,
+				resourceLoader: this.resourceLoader!,
+				noTools: "builtin",
+				customTools: this.customTools,
+				sessionManager: SessionManager.continueRecent(paths.data, paths.sessions),
+				settingsManager: SettingsManager.inMemory({
+					compaction: { enabled: true, reserveTokens: 2500, keepRecentTokens: 5000 },
+					retry: { enabled: true, maxRetries: 4, baseDelayMs: 1500 },
+				}),
+			});
+			session = res.session;
+		}
 		this.session = session;
 		await session.bindExtensions?.({});
 		this.wireEvents();
@@ -463,6 +497,18 @@ BLOCKED = assistant correctly asked the user for missing info.`,
 
 	/** He said something. */
 	async chat(text: string): Promise<void> {
+		if (this.startPromise) {
+			try {
+				await this.startPromise;
+			} catch (e) {
+				this.emitEvent({ type: "error", message: `Mai is not connected to Ollama: ${(e as Error).message}` });
+				return;
+			}
+		}
+		if (!this.session) {
+			this.emitEvent({ type: "error", message: "Mai's brain is still waking up. Please wait a moment." });
+			return;
+		}
 		const { newStreakDay } = this.mood.onUserMessage();
 		this.needs.onUserMessage();
 		this.emitEvent({ type: "needs", needs: this.needs.state });
@@ -487,7 +533,7 @@ BLOCKED = assistant correctly asked the user for missing info.`,
 
 	/** Her own clock woke her up. Returns what she said, or null if she stayed quiet. */
 	async wake(reason: string, details: string): Promise<string | null> {
-		if (this.busy) return null;
+		if (this.busy || !this.session) return null;
 		this.grants.clear();
 		this.run = { kind: "heartbeat", userText: "", toolsUsed: [], autoContinues: 0, lastText: "", finalText: "" };
 		try {
@@ -576,7 +622,7 @@ BLOCKED = assistant correctly asked the user for missing info.`,
 	}
 
 	abort(): Promise<void> {
-		return this.session.abort();
+		return this.session ? this.session.abort() : Promise.resolve();
 	}
 
 	saveConfig(next: Config): void {
