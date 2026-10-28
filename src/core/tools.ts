@@ -6,18 +6,21 @@ import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent
 import type { Calendar } from "./calendar.js";
 import { NEED_KEYS, type NeedKey, type Needs } from "./needs.js";
 import type { TodoList } from "./todos.js";
+import type { TaskBoard } from "./longtask.js";
 import type { Config } from "./config.js";
 import type { MoodEngine } from "./mood.js";
 import { PERSONA_FILES, type PersonaFile, type PersonaStore } from "./persona.js";
 import { isInside, type QuestBook, type QuestCheck } from "./quests.js";
 import { coerceArgs, type ToolSpec } from "./repair.js";
 import type { ScreenWatcher } from "./screen.js";
-import { isSecretPath, readAnyFile } from "./files.js";
+import { fileKind, isSecretPath, readAnyFile } from "./files.js";
+import { backupFile, findFiles, folderTree, type PlannedChange, planEdit, planInsert, planWrite, readLines, searchFiles } from "./fsops.js";
+import { paths } from "./paths.js";
 import { classify, runPowerShell } from "./shell.js";
 import { recommendModels, systemInfo } from "./system.js";
 
 export interface ApprovalRequest {
-	kind: "powershell" | "move_file" | "read_file";
+	kind: "powershell" | "move_file" | "read_file" | "edit_file" | "long_task";
 	/** One line, e.g. 'Move "cat.png" to Pictures'. */
 	summary: string;
 	/** Exact details he should check (command text, from/to paths). */
@@ -32,6 +35,8 @@ export interface Services {
 	mood: MoodEngine;
 	calendar: Calendar;
 	todos: TodoList;
+	tasks: TaskBoard;
+	onTaskChanged(): void;
 	needs: Needs;
 	onPlannerChanged(): void;
 	onNeedsChanged(): void;
@@ -222,6 +227,51 @@ export function buildTools(s: Services): ToolDefinition<TSchema, unknown>[] {
 		},
 	});
 
+	const startLongTask = defineTool({
+		name: "start_long_task",
+		label: "Ask to start a long task",
+		description:
+			"For bigger jobs that need many steps (read many files one by one, go through a folder, write a long document, compare lots of things): ask him for permission to work on it for a while. Give the goal and a step list. If he approves, you enter work mode and keep working turn after turn until done. Don't use this for quick things.",
+		parameters: Type.Object({
+			goal: Type.String({ description: "What will be true when you're done" }),
+			steps: Type.Array(Type.String(), { minItems: 1, description: "Concrete steps, e.g. 'Read report-01.pdf … report-20.pdf and note key numbers'" }),
+			why: Type.String({ description: "One sentence for him: why this needs a longer session" }),
+		}),
+		async execute(_id, p) {
+			if (s.tasks.running) throw new Error(`Already working on: ${s.tasks.current!.goal}. Finish it (task_progress finished=true) first.`);
+			const budget = s.cfg.agent.longTask;
+			const allowed = await s.approve({
+				kind: "long_task",
+				summary: `Work on: ${p.goal}`,
+				detail: `${p.steps.map((x, i) => `${i + 1}. ${x}`).join("\n")}\n\nBudget: up to ${budget.maxTurns} turns / ${budget.maxMinutes} minutes.`,
+				why: p.why,
+			});
+			if (!allowed) return ok("He said not now. Don't start the long task; ask what he'd prefer.");
+			s.tasks.start(p.goal, p.steps, budget);
+			s.onTaskChanged();
+			return ok(`Approved: work mode is on. Start with step 1 (${p.steps[0]}). After each step, call task_progress.`);
+		},
+	});
+
+	const taskProgress = defineTool({
+		name: "task_progress",
+		label: "Task progress",
+		description:
+			"During work mode: mark a step done (its number), save a note of what you found/did, add newly discovered steps, or finish the task (finished=true + summary for him).",
+		parameters: Type.Object({
+			step: Type.Optional(Type.Number({ description: "Number of the step you just completed" })),
+			note: Type.Optional(Type.String({ description: "Findings to remember (the chat may get summarized)" })),
+			add_steps: Type.Optional(Type.Array(Type.String())),
+			finished: Type.Optional(Type.Boolean()),
+			summary: Type.Optional(Type.String({ description: "When finished: what you did and found, for him" })),
+		}),
+		async execute(_id, p) {
+			const r = s.tasks.progress({ step: p.step, note: p.note, addSteps: p.add_steps, finished: p.finished, summary: p.summary });
+			s.onTaskChanged();
+			return ok(p.finished ? `${r} Now tell him the summary in a few lines.` : r);
+		},
+	});
+
 	const adjustNeeds = defineTool({
 		name: "adjust_needs",
 		label: "Feelings",
@@ -403,10 +453,18 @@ export function buildTools(s: Services): ToolDefinition<TSchema, unknown>[] {
 		parameters: Type.Object({
 			path: Type.String(),
 			offset: Type.Optional(Type.Number({ description: "Character offset for the next page of a long file" })),
+			start_line: Type.Optional(Type.Number({ description: "Text/code files: first line to show (numbered output, use before edit_file / insert_text)" })),
+			end_line: Type.Optional(Type.Number({ description: "Text/code files: last line to show (default: start_line + 199)" })),
 			question: Type.Optional(Type.String({ description: "For images: what you want to know" })),
 		}),
 		async execute(_id, p) {
 			const targetPath = p.path.trim().replace(/^["']|["']$/g, "");
+			if ((p.start_line !== undefined || p.end_line !== undefined) && existsSync(targetPath) && fileKind(targetPath) === "text") {
+				await guardRead(targetPath);
+				const r = readLines(targetPath, p.start_line ?? 1, p.end_line);
+				const more = r.to < r.total ? `\n…[more: lines ${r.to + 1}–${r.total}]` : "";
+				return ok(`[${basename(targetPath)} · lines ${r.from}–${r.to} of ${r.total}]\n${r.text}${more}`);
+			}
 			if (!existsSync(targetPath)) throw new Error(`File not found: ${targetPath}. Use list_folder to find the exact name.`);
 			try {
 				if (statSync(targetPath).isDirectory()) {
@@ -422,6 +480,148 @@ export function buildTools(s: Services): ToolDefinition<TSchema, unknown>[] {
 			}
 			const r = await readAnyFile(targetPath, { offset: p.offset, question: p.question }, s.describeImage);
 			return ok(r.text);
+		},
+	});
+
+	// ---------------------------------------------------------------- exploring and editing (src/core/fsops.ts)
+	const cleanPath = (p: string) => p.trim().replace(/^["']|["']$/g, "");
+	/** Reading outside the allowed folders asks him; secrets are never opened. */
+	async function guardRead(path: string): Promise<void> {
+		if (isSecretPath(path)) throw new Error("That holds secrets or passwords; I don't open those.");
+		if (!isInside(path, s.cfg.allowedRoots)) {
+			const allowed = await s.approve({ kind: "read_file", summary: `Look at "${basename(path)}"`, detail: path, why: "It's outside the folders she's allowed to look in." });
+			if (!allowed) throw new Error("He didn't let me look there.");
+		}
+	}
+	/** Changing files: only inside the allowed folders, never secrets, always with his approval and a backup. */
+	async function commitChange(change: PlannedChange, why: string, verb: string): Promise<string> {
+		if (isSecretPath(change.path)) throw new Error("That holds secrets or passwords; I don't touch those.");
+		if (!isInside(change.path, s.cfg.allowedRoots)) throw new Error(`I can only change files inside: ${s.cfg.allowedRoots.join(", ")}`);
+		const allowed = await s.approve({ kind: "edit_file", summary: `${verb} "${basename(change.path)}"`, detail: `${change.path}\n\n${change.diff}`, why });
+		if (!allowed) return `He did not approve changing ${basename(change.path)}. Nothing was written.`;
+		const backup = backupFile(change.path, join(paths.state, "backups"));
+		change.commit();
+		return `${verb} ${change.path}${backup ? ` (original backed up to ${backup})` : ""}\n${change.diff}`;
+	}
+	const heavyNote = (skipped: string[]) => (skipped.length ? `\n(skipped heavy folders: ${skipped.slice(0, 8).join(", ")}${skipped.length > 8 ? ", …" : ""}; pass include_heavy if he wants them)` : "");
+
+	const folderTreeTool = defineTool({
+		name: "folder_tree",
+		label: "Folder tree",
+		description: "Show a folder's structure as an indented tree (folders with item counts, files with sizes). Skips node_modules, .venv, .git, build output etc. unless include_heavy.",
+		parameters: Type.Object({
+			path: Type.String(),
+			depth: Type.Optional(Type.Number({ description: "Levels to show, default 2, max 5" })),
+			include_heavy: Type.Optional(Type.Boolean()),
+		}),
+		async execute(_id, p) {
+			const path = cleanPath(p.path);
+			if (!existsSync(path) || !statSync(path).isDirectory()) throw new Error(`Folder not found: ${path}`);
+			await guardRead(path);
+			return ok(folderTree(path, Math.min(Math.max(p.depth ?? 2, 1), 5), p.include_heavy));
+		},
+	});
+
+	const findFilesTool = defineTool({
+		name: "find_files",
+		label: "Find files",
+		description: 'Find files by name pattern under a folder, recursively. Examples: "*.pdf", "*report*", "src/**/*.ts". Skips node_modules, .venv, .git, build output unless include_heavy.',
+		parameters: Type.Object({
+			path: Type.String({ description: "Folder to search in" }),
+			pattern: Type.String(),
+			include_heavy: Type.Optional(Type.Boolean()),
+		}),
+		async execute(_id, p) {
+			const path = cleanPath(p.path);
+			if (!existsSync(path)) throw new Error(`Folder not found: ${path}`);
+			await guardRead(path);
+			const r = findFiles(path, p.pattern, { includeHeavy: p.include_heavy, limit: 80 });
+			const list = r.matches.map((m) => `${m.rel}${m.dir ? "/" : ""}`).join("\n");
+			return ok(`${r.total} match(es)${r.total > r.matches.length ? `, showing ${r.matches.length}` : ""}:\n${list || "(none)"}${heavyNote(r.skipped)}`);
+		},
+	});
+
+	const searchFilesTool = defineTool({
+		name: "search_files",
+		label: "Search in files",
+		description:
+			'Search inside text/code files under a folder for a word or phrase (case-insensitive), or a /regex/. Returns file:line: text. Optional glob limits which files, e.g. "*.md". Skips binaries, files over 2 MB, node_modules, .venv, .git, build output. For PDFs/Word use read_file.',
+		parameters: Type.Object({
+			path: Type.String({ description: "Folder to search in" }),
+			query: Type.String(),
+			glob: Type.Optional(Type.String()),
+			include_heavy: Type.Optional(Type.Boolean()),
+		}),
+		async execute(_id, p) {
+			const path = cleanPath(p.path);
+			if (!existsSync(path)) throw new Error(`Folder not found: ${path}`);
+			await guardRead(path);
+			const r = searchFiles(path, p.query, { glob: p.glob, includeHeavy: p.include_heavy, limit: 60 });
+			const lines = r.hits.map((h) => `${h.file}:${h.line}: ${h.text}`).join("\n");
+			return ok(`${r.hits.length}${r.truncatedResults ? "+" : ""} hit(s) in ${r.filesWithHits} file(s):\n${lines || "(none)"}${heavyNote(r.skipped)}`);
+		},
+	});
+
+	const editFileTool = defineTool({
+		name: "edit_file",
+		label: "Edit file",
+		description:
+			"Change part of a text/code file by exact replacement, without rewriting the rest. Read the file first (read_file with start_line) and copy old_text exactly, without the line-number prefix. Each old_text must appear once; several edits in one call are fine. He approves the diff; the original is backed up.",
+		parameters: Type.Object({
+			path: Type.String(),
+			edits: Type.Array(
+				Type.Object({
+					old_text: Type.String({ description: "Exact current text (a few lines, unique in the file)" }),
+					new_text: Type.String({ description: "Replacement text (empty to delete)" }),
+				}),
+				{ minItems: 1 },
+			),
+			why: Type.String({ description: "One sentence for him: what this change does" }),
+		}),
+		async execute(_id, p) {
+			const path = cleanPath(p.path);
+			if (!existsSync(path)) throw new Error(`File not found: ${path}`);
+			return ok(await commitChange(planEdit(path, p.edits.map((e) => ({ oldText: e.old_text, newText: e.new_text }))), p.why, "Edited"));
+		},
+	});
+
+	const insertTextTool = defineTool({
+		name: "insert_text",
+		label: "Insert lines",
+		description:
+			'Insert new lines into a text/code file next to an existing line. Best: give anchor = a unique piece of that line\'s text (e.g. "- gọi mẹ"). Or give line = its number from read_file start_line (0 + after = top; past the end = bottom). He approves; the original is backed up.',
+		parameters: Type.Object({
+			path: Type.String(),
+			text: Type.String({ description: "The new line(s) to insert" }),
+			anchor: Type.Optional(Type.String({ description: "Exact text from the line to insert next to (preferred)" })),
+			line: Type.Optional(Type.Number({ description: "Line number, if no anchor" })),
+			position: Type.Optional(Type.Union([Type.Literal("after"), Type.Literal("before")])),
+			why: Type.String(),
+		}),
+		async execute(_id, p) {
+			const path = cleanPath(p.path);
+			if (!existsSync(path)) throw new Error(`File not found: ${path}`);
+			if (p.anchor === undefined && p.line === undefined) throw new Error("Give anchor (text of the line) or line (its number).");
+			const where = p.anchor !== undefined ? { anchor: p.anchor } : (p.line as number);
+			return ok(await commitChange(planInsert(path, where, p.text, p.position ?? "after"), p.why, "Inserted into"));
+		},
+	});
+
+	const writeFileTool = defineTool({
+		name: "write_file",
+		label: "Write file",
+		description:
+			'Create a new text file (mode "create"), add to the end of one ("append"), or replace a whole file ("overwrite": only when he asked for the whole thing to be rewritten; prefer edit_file). He approves; existing files are backed up.',
+		parameters: Type.Object({
+			path: Type.String(),
+			content: Type.String(),
+			mode: Type.Union([Type.Literal("create"), Type.Literal("append"), Type.Literal("overwrite")]),
+			why: Type.String(),
+		}),
+		async execute(_id, p) {
+			const path = cleanPath(p.path);
+			const verb = p.mode === "create" ? "Created" : p.mode === "append" ? "Appended to" : "Rewrote";
+			return ok(await commitChange(planWrite(path, p.content, p.mode), p.why, verb));
 		},
 	});
 
@@ -507,6 +707,8 @@ ${r.output}`);
 		todoComplete,
 		todoRemove,
 		adjustNeeds,
+		startLongTask,
+		taskProgress,
 		questGive,
 		questCheck,
 		questResolve,
@@ -514,7 +716,13 @@ ${r.output}`);
 		sysInfo,
 		recommend,
 		listFolder,
+		folderTreeTool,
+		findFilesTool,
+		searchFilesTool,
 		readFile,
+		editFileTool,
+		insertTextTool,
+		writeFileTool,
 		moveFile,
 		openThing,
 		...(s.cfg.shell.enabled ? [powershell] : []),

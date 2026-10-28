@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld("mai", {
 	todoToggle: (id, done) => ipcRenderer.invoke("todo-toggle", id, done),
 	todoRemove: (id) => ipcRenderer.invoke("todo-remove", id),
 	eventRemove: (id) => ipcRenderer.invoke("event-remove", id),
+	stopTask: () => ipcRenderer.invoke("stop-task"),
 	moveBy: (dx, dy) => ipcRenderer.send("pet-move", dx, dy),
 	// settings window
 	getConfig: () => ipcRenderer.invoke("get-config"),

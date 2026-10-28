@@ -82,6 +82,11 @@ export class Heartbeat {
 		const b = this.brain;
 		b.tickNeeds();
 		if (new Date().getMinutes() % 4 === 0) b.keepWarm();
+		// An approved long task that stalled (a step errored, the app restarted): pick it back up.
+		if (b.tasks?.running && !b.busy) {
+			await b.resumeTask();
+			return;
+		}
 		const due = b.calendar.takeDue();
 		if (due.length) {
 			await this.fire(

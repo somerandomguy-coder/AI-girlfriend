@@ -219,7 +219,9 @@ if ($Profile -eq "auto") {
 }
 Ok "GPU: $gpu, $vram GB VRAM -> profile '$Profile'"
 $profiles = @{
-	"32gb" = @{ main = @("gemma4:26b-a4b-it-qat", "gemma4:12b"); helper = "qwen3.5:4b"; ctx = 32768; voiceCuda = $true; expressive = $true }
+	# 24 GB+: same brain as 16 GB (gemma4:12b is plenty for a companion); the extra VRAM goes to a longer
+	# context for work mode and to the GPU voice (VieNeu on CUDA + VoxCPM2).
+	"32gb" = @{ main = @("gemma4:12b"); helper = "qwen3.5:4b"; ctx = 32768; voiceCuda = $true; expressive = $true }
 	"16gb" = @{ main = @("gemma4:12b"); helper = "qwen3.5:4b"; ctx = 16384; voiceCuda = $false }
 	"8gb"  = @{ main = @("qwen3.5:9b", "qwen3.5:4b"); helper = "qwen3.5:4b"; ctx = 12288; voiceCuda = $false }
 	"cpu"  = @{ main = @("qwen3.5:4b"); helper = "qwen3.5:4b"; ctx = 8192; voiceCuda = $false }
@@ -239,9 +241,32 @@ if ((Test-Path $dist) -and ((Get-Item $dist).LastWriteTime -ge $newestSrc)) { Ok
 	if (-not $CheckOnly) { Push-Location $Root; npm run build | Out-Null; Pop-Location; Ok "built" }
 }
 
+# ---------------------------------------------------------------- Ollama RAM limits
+# Ollama's runner (llama-server) keeps old conversations in system RAM: a prompt cache of up to 8 GB plus
+# up to 32 "context checkpoints" per chat. With Mai's changing prompts that grows to 10-15 GB of RAM even
+# though the model itself sits in VRAM. These llama.cpp settings cap it (measured: RAM stays ~2 GB, same
+# speed). They are read by every model Ollama starts, so Ollama is restarted once if they change.
+Step "Ollama memory limits"
+function Ollama-Up { try { Invoke-RestMethod "http://127.0.0.1:11434/api/version" -TimeoutSec 2 | Out-Null; $true } catch { $false } }
+$ramLimits = @{ "LLAMA_ARG_CACHE_RAM" = "1024"; "LLAMA_ARG_CTX_CHECKPOINTS" = "4" }
+$changed = $false
+foreach ($k in $ramLimits.Keys) {
+	if ([Environment]::GetEnvironmentVariable($k, "User") -eq $ramLimits[$k]) { Ok "$k = $($ramLimits[$k])"; continue }
+	Todo "$k = $($ramLimits[$k]) (caps Ollama's RAM cache)"
+	if (-not $CheckOnly) {
+		[Environment]::SetEnvironmentVariable($k, $ramLimits[$k], "User")
+		Set-Item -Path "Env:$k" -Value $ramLimits[$k]
+		$changed = $true
+	}
+}
+if ($changed -and (Ollama-Up)) {
+	Say "..." "restarting Ollama so the limits apply"
+	Get-Process "ollama app", "ollama", "llama-server" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+	Start-Sleep 2
+}
+
 # ---------------------------------------------------------------- Ollama models
 Step "AI models (Ollama)"
-function Ollama-Up { try { Invoke-RestMethod "http://127.0.0.1:11434/api/version" -TimeoutSec 2 | Out-Null; $true } catch { $false } }
 if (-not $CheckOnly -and (Has "ollama") -and -not (Ollama-Up)) {
 	Say "..." "starting Ollama"
 	$app = Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama app.exe"
@@ -277,11 +302,14 @@ $helperTag = Pull-First @($P.helper) -AllowDownload:(-not $SkipModels)
 foreach ($pair in @(@("mai-brain", $mainTag), @("mai-helper", $helperTag))) {
 	$name, $from = $pair
 	$want = "FROM $from`nPARAMETER num_ctx $($P.ctx)`n"
-	$mf = Join-Path $Root "ollama\$name.Modelfile"
+	# The generated Modelfile is per machine, so it lives in the data folder, not the git repo (editing
+	# tracked files here would make the next "git pull" refuse to update).
+	$mf = Join-Path $DataDir "ollama\$name.Modelfile"
 	$current = if (Test-Path $mf) { Get-Content $mf -Raw } else { "" }
 	if (($have -contains "${name}:latest") -and ($current -eq $want)) { Ok "$name -> $from ($($P.ctx) ctx)"; continue }
 	Todo "$name -> $from ($($P.ctx) ctx)"
 	if (-not $CheckOnly) {
+		New-Item -ItemType Directory -Force (Split-Path $mf) | Out-Null
 		Set-Content -Path $mf -Value $want -NoNewline -Encoding ascii
 		ollama create $name -f $mf | Out-Null
 		Ok "$name created"
@@ -311,9 +339,10 @@ if ($NoVoice) { Say "skip" "local voice (-NoVoice): she'll use the online edge v
 	$cudaDll = Join-Path $Root "sidecars\audiocpp\bin\ggml-cuda.dll"
 	$wantCuda = $P.voiceCuda -and $isNvidia
 	$voxFile = Join-Path $Root "sidecars\audiocpp\models\voxcpm2\voxcpm2-q8_0.gguf"
+	$asrFile = Join-Path $Root "sidecars\audiocpp\models\qwen3-asr\qwen3-asr-0.6b-q8_0.gguf"
 	$wantVox = [bool]$P.expressive -and $isNvidia
-	if ((Test-Path $gguf) -and (Test-Path $server) -and ((-not $wantCuda) -or (Test-Path $cudaDll)) -and ((-not $wantVox) -or (Test-Path $voxFile))) { Ok "VieNeu-TTS + audio.cpp ($(if ($wantCuda) {'CUDA'} else {'CPU'}))" } else {
-		Todo "VieNeu-TTS + audio.cpp ($(if ($wantCuda) {'CUDA, ~850 MB'} else {'CPU, ~220 MB'}))$(if ($wantVox) {' + VoxCPM2 expressive voice (~3 GB)'})"
+	if ((Test-Path $gguf) -and (Test-Path $server) -and ((-not $wantCuda) -or (Test-Path $cudaDll)) -and ((-not $wantVox) -or (Test-Path $voxFile)) -and (Test-Path $asrFile)) { Ok "VieNeu-TTS + Qwen3-ASR (mic) + audio.cpp ($(if ($wantCuda) {'CUDA'} else {'CPU'}))" } else {
+		Todo "VieNeu-TTS + Qwen3-ASR mic (~1.2 GB) + audio.cpp ($(if ($wantCuda) {'CUDA, ~850 MB'} else {'CPU, ~220 MB'}))$(if ($wantVox) {' + VoxCPM2 expressive voice (~3 GB)'})"
 		if (-not $CheckOnly) {
 			$vargs = @("-ExecutionPolicy", "Bypass", "-File", (Join-Path $Root "scripts\setup-vieneu.ps1"))
 			if ($wantCuda) { $vargs += "-Cuda" }

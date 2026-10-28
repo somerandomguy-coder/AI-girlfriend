@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, screen, shell, Tray } from "electron";
 import { Brain, type BrainEvent } from "../core/brain.js";
+import type { ApprovalRequest } from "../core/tools.js";
 import { type Config, loadConfig } from "../core/config.js";
 import { Heartbeat } from "../core/heartbeat.js";
 import { APP_ROOT, paths } from "../core/paths.js";
@@ -204,22 +205,28 @@ function hidePet(): void {
 function wireBrain(): void {
 	brain.approver = async (req) => {
 		pet?.show();
-		const text = {
+		const texts: Record<ApprovalRequest["kind"], { what: string; all?: string; note: string }> = {
 			powershell: { what: "PowerShell command", all: "commands", note: "Only allow this if you understand what it does." },
 			move_file: { what: "file move", all: "moves", note: "Nothing moves unless you allow it." },
 			read_file: { what: "reading a file", all: "reads", note: "She'll see this file's content." },
-		}[req.kind];
+			edit_file: { what: "changing a file", all: "file changes", note: "The original is backed up first (data folder → state\\backups)." },
+			long_task: { what: "a longer task", note: "She'll keep working step by step until it's done (each file change still asks you). Stop her any time with ⏹." },
+		};
+		const text = texts[req.kind];
+		// A long task is a yes/no question; the rest can be allowed for the whole request at once.
+		const buttons = text.all ? ["Allow once", `Allow all ${text.all} for this request`, "Deny"] : ["Let her work on it", "Not now"];
 		const r = await dialog.showMessageBox({
 			type: req.kind === "powershell" ? "warning" : "question",
 			title: `Mai is asking permission: ${text.what}`,
 			message: `${req.summary}\n\n“${req.why}”`,
 			detail: `${req.detail}\n\n${text.note}`,
-			buttons: ["Allow once", `Allow all ${text.all} for this request`, "Deny"],
-			defaultId: 2,
-			cancelId: 2,
+			buttons,
+			defaultId: buttons.length - 1,
+			cancelId: buttons.length - 1,
 			noLink: true,
 		});
-		return r.response === 0 ? "once" : r.response === 1 ? "all" : "deny";
+		if (r.response === buttons.length - 1) return "deny";
+		return r.response === 1 ? "all" : "once";
 	};
 	brain.on("event", (e: BrainEvent) => {
 		pet?.webContents.send("brain-event", e);
@@ -251,19 +258,16 @@ function registerIpc(): void {
 		settingsWin?.webContents.send("chat-cleared");
 		return { ok: true };
 	});
-	ipcMain.handle("transcribe-audio", async (_e, payload: { buffer: number[]; mimeType: string; lang?: "vi" | "en" }) => {
-		try {
-			const buf = Buffer.from(payload.buffer);
-			return await transcribeAudio(buf, payload.mimeType, brain.cfg, { lang: payload.lang ?? "vi" });
-		} catch {
-			return "";
-		}
-	});
+	// Errors propagate to the pet, which shows the reason in her bubble.
+	ipcMain.handle("transcribe-audio", (_e, payload: { wav: Uint8Array; lang?: "vi" | "en" | "auto" }) =>
+		transcribeAudio(Buffer.from(payload.wav), brain.cfg, { lang: payload.lang ?? "vi" }),
+	);
 	ipcMain.handle("sprite", () => {
 		const dir = spriteDir(brain.cfg.spriteSet);
 		return { base: `${pathToFileURL(dir).href}/`, manifest: JSON.parse(readFileSync(join(dir, "sprite.json"), "utf8")) };
 	});
-	ipcMain.handle("status", () => ({ mood: brain.mood.state, needs: brain.needs?.state, muted, busy: brain.busy, loading: brain.loading }));
+	ipcMain.handle("status", () => ({ mood: brain.mood.state, needs: brain.needs?.state, muted, busy: brain.busy, loading: brain.loading, task: brain.tasks?.snapshot() }));
+	ipcMain.handle("stop-task", () => brain.stopTask());
 	ipcMain.handle("open-settings", () => openSettings());
 	ipcMain.handle("set-muted", (_e, m: boolean) => {
 		muted = m;

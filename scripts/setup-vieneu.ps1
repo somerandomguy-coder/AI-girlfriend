@@ -42,6 +42,11 @@ foreach ($v in $Voices) {
   Get-File "$hf/voices/$v/speaker.emb.txt" (Join-Path $vd "speaker.emb.txt")
 }
 
+Write-Host "2a/3 Qwen3-ASR 0.6B (q8_0, 1.15 GB): speech recognition for the mic button (Vietnamese + English)"
+$asr = Join-Path $ac "models\qwen3-asr"
+New-Item -ItemType Directory -Force $asr | Out-Null
+Get-File "https://huggingface.co/audio-cpp/audio.cpp-gguf/resolve/main/Qwen3-ASR-0.6B-GGUF/qwen3-asr-0.6b-q8_0.gguf" (Join-Path $asr "qwen3-asr-0.6b-q8_0.gguf")
+
 if ($Expressive) {
   Write-Host "2b/3 VoxCPM2 (q8_0, 2.96 GB) for expressive voice"
   $vox = Join-Path $ac "models\voxcpm2"

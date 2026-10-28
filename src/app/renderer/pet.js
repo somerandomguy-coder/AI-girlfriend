@@ -19,6 +19,9 @@ const TOOL_LABEL = {
   list_folder: "digging through folders", move_file: "moving files", open: "opening it",
   todo_add: "writing your todo", todo_list: "checking your todos", todo_complete: "ticking it off", todo_remove: "crossing it out",
   adjust_needs: "having feelings", run_powershell: "running a command", read_file: "reading your file 📄",
+  folder_tree: "looking around the folder", find_files: "looking for files 🔎", search_files: "searching inside files 🔎",
+  edit_file: "editing a file ✏️", insert_text: "adding lines ✏️", write_file: "writing a file ✏️",
+  start_long_task: "asking to work on it", task_progress: "ticking off a step",
 };
 
 let sprite = null;
@@ -167,6 +170,9 @@ window.mai.onEvent((e) => {
       break;
     case "needs":
       setNeeds(e.needs);
+      break;
+    case "task":
+      setTask(e.task);
       break;
     case "planner_changed":
       if ($("talk").dataset.panel === "planner") void renderPlanner();
@@ -352,6 +358,24 @@ function setNeeds(n) {
   }
 }
 
+// ---------- work mode: a long task he approved, with progress and a stop button ----------
+let taskDoneTimer = null;
+function setTask(t) {
+  const bar = $("taskbar");
+  clearTimeout(taskDoneTimer);
+  if (!t) { bar.classList.add("hidden"); return; }
+  const pct = t.total ? Math.round((t.done / t.total) * 100) : 0;
+  const label = { running: "🛠 Working", done: "✅ Done", stopped: "⏹ Stopped", out_of_budget: "⌛ Out of time" }[t.status] || t.status;
+  $("task-text").textContent = `${label}: ${t.goal} · ${t.done}/${t.total}${t.status === "running" && t.next ? ` · next: ${t.next}` : ""}`;
+  $("task-progress").firstElementChild.style.width = `${pct}%`;
+  $("btn-stop-task").hidden = t.status !== "running";
+  bar.classList.toggle("finished", t.status !== "running");
+  bar.classList.remove("hidden");
+  // Finished tasks stay visible for a minute, then the bar goes away.
+  if (t.status !== "running") taskDoneTimer = setTimeout(() => bar.classList.add("hidden"), 60000);
+}
+$("btn-stop-task").addEventListener("click", () => window.mai.stopTask());
+
 // ---------- where she is: roaming on the desktop, or the full chat window ----------
 function applyPose(p) {
   pose = p;
@@ -398,7 +422,6 @@ sayBox.addEventListener("keydown", (ev) => {
 
 // ---------- Speech to Text (STT) (Vietnamese priority, English supported) ----------
 const btnMic = $("btn-mic");
-let recognition = null;
 let isRecording = false;
 let mediaRecorder = null;
 let audioStream = null;
@@ -421,9 +444,6 @@ function updateMicUi(recording) {
 }
 
 async function stopSTT() {
-  if (recognition) {
-    try { recognition.stop(); } catch {}
-  }
   if (mediaRecorder && mediaRecorder.state !== "inactive") {
     try { mediaRecorder.stop(); } catch {}
   }
@@ -434,50 +454,36 @@ async function stopSTT() {
   updateMicUi(false);
 }
 
+// Chromium's SpeechRecognition needs Google's servers and an API key, which Electron doesn't have: it
+// fails with "network" after you've already started talking. Mai always records locally instead and
+// transcribes with Qwen3-ASR on her own voice server.
 async function startSTT() {
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (SpeechRecognition) {
-    try {
-      recognition = new SpeechRecognition();
-      recognition.continuous = false;
-      recognition.interimResults = true;
-      recognition.lang = micLang;
-
-      recognition.onresult = (event) => {
-        let text = "";
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          text += event.results[i][0].transcript;
-        }
-        if (text.trim()) {
-          sayBox.value = text.trim();
-          growInput();
-        }
-      };
-
-      recognition.onerror = async (event) => {
-        console.warn("SpeechRecognition error:", event.error);
-        if (event.error === "not-allowed") {
-          stopSTT();
-          showBubble("Microphone access was denied.", { meta: "mic" });
-        } else {
-          // Fall back to MediaRecorder audio recording and backend transcription
-          await startMediaRecorder();
-        }
-      };
-
-      recognition.onend = () => {
-        updateMicUi(false);
-        if (sayBox.value.trim()) sayBox.focus();
-      };
-
-      updateMicUi(true);
-      recognition.start();
-      return;
-    } catch (e) {
-      console.warn("SpeechRecognition start failed, falling back to MediaRecorder:", e);
-    }
-  }
   await startMediaRecorder();
+}
+
+/** Decode any recording the browser made (webm/opus…) and re-encode it as 16 kHz mono 16-bit WAV. */
+async function toWav16k(blob) {
+  const ctx = new AudioContext();
+  const decoded = await ctx.decodeAudioData(await blob.arrayBuffer());
+  ctx.close();
+  const rate = 16000;
+  const offline = new OfflineAudioContext(1, Math.max(1, Math.ceil(decoded.duration * rate)), rate);
+  const src = offline.createBufferSource();
+  src.buffer = decoded;
+  src.connect(offline.destination);
+  src.start();
+  const samples = (await offline.startRendering()).getChannelData(0);
+  const out = new DataView(new ArrayBuffer(44 + samples.length * 2));
+  const str = (o, t) => { for (let i = 0; i < t.length; i++) out.setUint8(o + i, t.charCodeAt(i)); };
+  str(0, "RIFF"); out.setUint32(4, 36 + samples.length * 2, true); str(8, "WAVE");
+  str(12, "fmt "); out.setUint32(16, 16, true); out.setUint16(20, 1, true); out.setUint16(22, 1, true);
+  out.setUint32(24, rate, true); out.setUint32(28, rate * 2, true); out.setUint16(32, 2, true); out.setUint16(34, 16, true);
+  str(36, "data"); out.setUint32(40, samples.length * 2, true);
+  for (let i = 0; i < samples.length; i++) {
+    const v = Math.max(-1, Math.min(1, samples[i]));
+    out.setInt16(44 + i * 2, v < 0 ? v * 0x8000 : v * 0x7fff, true);
+  }
+  return { wav: new Uint8Array(out.buffer), seconds: decoded.duration };
 }
 
 async function startMediaRecorder() {
@@ -507,11 +513,11 @@ async function startMediaRecorder() {
         return;
       }
       const blob = new Blob(audioChunks, { type: mimeType });
-      const arrayBuffer = await blob.arrayBuffer();
-      const buffer = Array.from(new Uint8Array(arrayBuffer));
       sayBox.placeholder = "Transcribing voice…";
       try {
-        const text = await window.mai.transcribe({ buffer, mimeType: blob.type, lang: micLang === "vi-VN" ? "vi" : "en" });
+        const { wav, seconds } = await toWav16k(blob);
+        if (seconds < 0.4) throw new Error("That was too short. Hold the mic a little longer.");
+        const text = await window.mai.transcribe({ wav, lang: micLang === "vi-VN" ? "vi" : "en" });
         if (text && text.trim()) {
           sayBox.value = (sayBox.value ? sayBox.value + " " : "") + text.trim();
           growInput();
@@ -520,7 +526,8 @@ async function startMediaRecorder() {
           showBubble("Could not detect speech. Try speaking closer to the microphone.", { meta: "mic" });
         }
       } catch (err) {
-        showBubble("Transcription error: " + err.message, { meta: "stt error" });
+        // ipcRenderer wraps errors as "Error invoking remote method …: Error: <reason>"; show just the reason.
+        showBubble("🎙️ " + String(err.message || err).replace(/^.*Error: /, ""), { meta: "voice input" });
       } finally {
         updateMicUi(false);
       }
@@ -560,7 +567,7 @@ function setClickThrough(on) {
 }
 document.addEventListener("mousemove", (ev) => {
   if (dragging) return;
-  const solid = ev.target.closest && ev.target.closest("#bubble:not(.hidden), #talk[data-panel=log] #log, #talk[data-panel=planner] #planner, #activity:not(.hidden), #avatar, #mood-badge, #needs, #controls");
+  const solid = ev.target.closest && ev.target.closest("#bubble:not(.hidden), #talk[data-panel=log] #log, #talk[data-panel=planner] #planner, #taskbar:not(.hidden), #activity:not(.hidden), #avatar, #mood-badge, #needs, #controls");
   setClickThrough(!solid);
 });
 document.addEventListener("mouseleave", () => { if (!dragging) setClickThrough(true); });
@@ -675,6 +682,7 @@ window.mai.onChatCleared?.(() => {
   setHearts(st.mood.affection);
   if (st.needs) setNeeds(st.needs);
   if (st.loading) setLoading(true);
+  if (st.task) setTask(st.task);
   muted = st.muted;
   $("btn-mute").textContent = muted ? "🔇" : "🔊";
 })();

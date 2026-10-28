@@ -44,3 +44,10 @@ They're her local voice server and helper, listening on 127.0.0.1 only. Allow th
 ### Start over
 Quit Mai (tray → Quit) and rename `%USERPROFILE%\.mai-companion`. Next start she's brand new. Your old self is
 still in the renamed folder.
+
+### llama-server uses 10–15 GB of RAM (not VRAM)
+
+That is Ollama's runner caching old conversations in system RAM: a prompt cache of up to 8 GB plus up to
+32 "context checkpoints" per chat. The model itself is still in VRAM. `setup.cmd` caps it with two user
+environment variables (`LLAMA_ARG_CACHE_RAM=1024`, `LLAMA_ARG_CTX_CHECKPOINTS=4`) and restarts Ollama. In
+tests, RAM stayed around 2 GB with no speed difference. To undo it, delete those two variables and restart Ollama.

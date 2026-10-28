@@ -69,6 +69,8 @@ export interface Config {
 	agent: {
 		/** Extra nudges when she stops mid-task ("CONTINUE" verdict from the goal check). */
 		maxAutoContinues: number;
+		/** Work mode budget for one approved long task. */
+		longTask: { maxTurns: number; maxMinutes: number };
 	};
 	shell: {
 		/** Let her run PowerShell. Dangerous commands are always blocked regardless. */
@@ -122,7 +124,7 @@ export const DEFAULT_CONFIG: Config = {
 		openai: { baseUrl: "http://127.0.0.1:8080", model: "vieneu-tts", voice: "default" },
 	},
 	repair: { useNeedle: true, needlePort: 8765 },
-	agent: { maxAutoContinues: 3 },
+	agent: { maxAutoContinues: 3, longTask: { maxTurns: 150, maxMinutes: 90 } },
 	shell: { enabled: true, approval: "writes", timeoutSeconds: 60 },
 	allowedRoots: [`${home}\\Desktop`, `${home}\\Documents`, `${home}\\Downloads`, `${home}\\Pictures`],
 	spriteSet: "aza",

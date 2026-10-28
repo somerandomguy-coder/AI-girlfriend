@@ -11,7 +11,7 @@
             │ pi AgentSession (Ollama via OpenAI API)                  │
             │  hooks: per-turn system prompt · tool-call repair ·      │
             │         goal check (keep going / don't fabricate)        │
-            │ tools.ts (22 tools) · persona (git) · mood · needs ·     │
+            │ tools.ts (30 tools) · persona (git) · mood · needs ·     │
             │ calendar · todos · quests · screen · heartbeat           │
             └──────┬───────────────────────────┬──────────────────────┘
                    │                           │
@@ -39,6 +39,22 @@
    - if she promised work she didn't do, or stated facts without the tool that checks them, the small model
      judges and she's nudged to continue (at most `agent.maxAutoContinues`).
 
+## Work mode (long tasks)
+
+1. **She asks.** `start_long_task` sends a goal and a step list to an approval dialog. On approval, `TaskBoard`
+   (`longtask.ts`) saves the task to `state/task.json`.
+2. **Every turn.** The prompt gets a "Work mode" section: goal, checklist, her recent notes, budget left. She logs
+   each finished step and any findings with `task_progress`.
+3. **Keep going.** In `agent_before_settle`, a running task always continues with "Keep going: step N".
+   - **Context guard:** pi only compacts when a run *starts*, and a long task is one long run. Past ~65% of the
+     window, or after a turn that ran out of room, work mode compacts everything but the last few turns into the
+     task board's goal, checklist and notes.
+   - **Stall guard:** three continuations in a row without any tool use pause the task, and she reports what's
+     blocking.
+   - **Budget:** `agent.longTask.maxTurns` / `maxMinutes`; when it runs out she reports what's done and what's left.
+4. **Resume.** If a run errors or the app restarts mid-task, the heartbeat's minute tick calls `resumeTask()`.
+   ⏹ in the task bar calls `stopTask()`.
+
 ## Proactive behaviour (`heartbeat.ts`)
 
 - **Every minute:**
@@ -57,6 +73,9 @@
 
 | Change | File |
 |---|---|
+| File exploring / editing | `src/core/fsops.ts` (walk, find, search, exact edits, insert, backups) |
+| Work mode (long tasks) | `src/core/longtask.ts` (task board) + the work-mode branch of `agent_before_settle` in `brain.ts` |
+| Mic / speech recognition | `src/core/stt.ts` (Qwen3-ASR via audio.cpp), `toWav16k` in `pet.js` |
 | Add a tool | `src/core/tools.ts` (`defineTool`, add to the returned list; give it a label in `TOOL_LABEL` in `pet.js`) |
 | A new need / tweak rates | `src/core/needs.ts` |
 | Prompt structure | `src/core/prompt.ts` |
@@ -76,6 +95,10 @@
 | `npx tsx scripts/shell-test.ts` | PowerShell safety classifier + runner |
 | `npx tsx scripts/markdown-test.ts` | bubble Markdown renderer (incl. XSS cases) |
 | `npx tsx scripts/needs-test.ts` | needs drift, feeding, todos |
+| `npx tsx scripts/fsops-test.ts` | find/search/tree, exact edits, insert by anchor, CRLF/BOM, backups |
+| `npx tsx scripts/task-test.ts` | work-mode task board: steps, notes, budget, restart |
+| `$env:MAI_HOME="$env:TEMP\mai-work"; npx tsx scripts/work-e2e.ts` | real model: explore, edit, and long tasks looped to completion |
+| `npx tsx scripts/stt-test.ts` | mic round trip VieNeu → Qwen3-ASR (needs Mai's voice server running) |
 | `npx tsx scripts/files-test.ts [--vision]` | read_file across ~15 formats (+ real vision model) |
 | `node scripts/check-sprites.mjs [dir]` | sprite set validator |
 | `$env:MAI_HOME="$env:TEMP\mai-e2e"; npx tsx scripts/e2e.ts` | real-model scenarios (needs Ollama) |

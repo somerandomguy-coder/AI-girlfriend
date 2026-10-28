@@ -19,6 +19,7 @@ import { PersonaStore } from "./persona.js";
 import { Needs, type NeedsState } from "./needs.js";
 import { buildSystemPrompt } from "./prompt.js";
 import { TodoList } from "./todos.js";
+import { TaskBoard } from "./longtask.js";
 import { QuestBook } from "./quests.js";
 import { extractCallsFromText, needleRepair, type ToolSpec, toToolCallBlock } from "./repair.js";
 import { ScreenWatcher } from "./screen.js";
@@ -42,6 +43,7 @@ export type BrainEvent =
 	| { type: "persona_changed" }
 	| { type: "needs"; needs: NeedsState }
 	| { type: "planner_changed" }
+	| { type: "task"; task: ReturnType<TaskBoard["snapshot"]> }
 	| { type: "repair"; detail: string }
 	| { type: "error"; message: string };
 
@@ -117,8 +119,12 @@ export class Brain extends EventEmitter {
 	mood!: MoodEngine;
 	calendar!: Calendar;
 	todos!: TodoList;
+	tasks!: TaskBoard;
 	needs!: Needs;
 	private lastTodoCheer = 0;
+	/** Work mode stall detection: tools run since the last continuation, and continuations in a row without any. */
+	private workToolsThisTurn = 0;
+	private workIdleTurns = 0;
 	/** True while the models are being loaded into memory (she yawns meanwhile). */
 	loading = true;
 	quests!: QuestBook;
@@ -162,6 +168,10 @@ export class Brain extends EventEmitter {
 			mood: this.mood,
 			calendar: this.calendar,
 			todos: this.todos,
+			get tasks() {
+				return self.tasks;
+			},
+			onTaskChanged: () => this.emitEvent({ type: "task", task: this.tasks.snapshot() }),
 			needs: this.needs,
 			onPlannerChanged: () => this.emitEvent({ type: "planner_changed" }),
 			onNeedsChanged: () => this.emitEvent({ type: "needs", needs: this.needs.state }),
@@ -191,6 +201,7 @@ export class Brain extends EventEmitter {
 		this.mood = new MoodEngine();
 		this.calendar = new Calendar();
 		this.todos = new TodoList();
+		this.tasks = new TaskBoard();
 		this.needs = new Needs();
 		this.quests = new QuestBook(this.cfg.allowedRoots);
 		this.screen = new ScreenWatcher(this.cfg);
@@ -275,7 +286,7 @@ export class Brain extends EventEmitter {
 				customTools: this.customTools,
 				sessionManager: SessionManager.continueRecent(paths.data, paths.sessions),
 				settingsManager: SettingsManager.inMemory({
-					compaction: { enabled: true, reserveTokens: 2500, keepRecentTokens: 5000 },
+					compaction: { enabled: true, reserveTokens: 4500, keepRecentTokens: 4000 },
 					retry: { enabled: true, maxRetries: 4, baseDelayMs: 1500 },
 				}),
 			});
@@ -299,7 +310,7 @@ export class Brain extends EventEmitter {
 				customTools: this.customTools,
 				sessionManager: SessionManager.continueRecent(paths.data, paths.sessions),
 				settingsManager: SettingsManager.inMemory({
-					compaction: { enabled: true, reserveTokens: 2500, keepRecentTokens: 5000 },
+					compaction: { enabled: true, reserveTokens: 4500, keepRecentTokens: 4000 },
 					retry: { enabled: true, maxRetries: 4, baseDelayMs: 1500 },
 				}),
 			});
@@ -363,6 +374,40 @@ export class Brain extends EventEmitter {
 		});
 
 		pi.on("agent_before_settle", async (event) => {
+			if (this.tasks?.running && event.outcome === "completed") {
+				// A long task keeps one run going for many turns, and pi only compacts when a run starts, so
+				// work mode watches the context itself: past ~65% of the window (or after a turn that ran out
+				// of room), everything but the last few turns is replaced by the task's own goal/checklist/notes.
+				const compaction = this.workModeCompaction(event.context);
+				const custom = (content: string) => ({
+					entries: [...(compaction ? [compaction] : []), { type: "custom_message" as const, customType: "work_mode", content, display: false }],
+					continue: true,
+				});
+				// No tool used across several continuations = she's spinning, not working.
+				if (this.tasks.current!.turns === 0) this.workIdleTurns = 0; // a fresh task starts with a clean slate
+				this.workIdleTurns = this.workToolsThisTurn ? 0 : this.workIdleTurns + 1;
+				this.workToolsThisTurn = 0;
+				if (this.workIdleTurns >= 3) {
+					this.workIdleTurns = 0;
+					const stuck = this.tasks.nextStep();
+					this.tasks.progress({ note: `Got stuck on step ${stuck?.index ?? "?"}; paused for his input.` });
+					this.tasks.stop("stopped");
+					this.emitEvent({ type: "task", task: this.tasks.snapshot() });
+					return custom(`[work mode] You haven't made progress for a few turns, so the task is paused. Tell him in one or two lines what's done and what's blocking step ${stuck?.index ?? ""}.`);
+				}
+				if (!this.tasks.tick()) {
+					this.tasks.stop("out_of_budget");
+					this.emitEvent({ type: "task", task: this.tasks.snapshot() });
+					return custom("[work mode] The time/turn budget for this task is used up. Stop working now and tell him briefly what's done and what's left.");
+				}
+				this.emitEvent({ type: "task", task: this.tasks.snapshot() });
+				const next = this.tasks.nextStep();
+				return custom(
+					next
+						? `[work mode] Keep going: step ${next.index} — ${next.text}. Use your tools, then call task_progress.`
+						: "[work mode] All steps are checked. If the goal is really met, call task_progress with finished=true and a summary for him; otherwise add the missing steps.",
+				);
+			}
 			const run = this.run;
 			if (!run || run.kind !== "user" || event.outcome !== "completed") return;
 			if (run.autoContinues >= this.cfg.agent.maxAutoContinues) return;
@@ -478,6 +523,7 @@ BLOCKED = assistant correctly asked the user for missing info.`,
 					break;
 				}
 				case "tool_execution_start":
+					this.workToolsThisTurn++;
 					this.run?.toolsUsed.push(e.toolName);
 					this.emitEvent({ type: "state", state: "tool" });
 					this.emitEvent({ type: "tool", name: e.toolName, phase: "start" });
@@ -561,7 +607,7 @@ BLOCKED = assistant correctly asked the user for missing info.`,
 		this.emitEvent({ type: "state", state: "loading" });
 		const o = this.cfg.ollama;
 		await Promise.allSettled([
-			ollamaChat(o.baseUrl, o.model, [{ role: "user", content: "hi" }], { numPredict: 1, numCtx: o.contextWindow, timeoutMs: 180_000 }),
+			ollamaChat(o.baseUrl, o.model, [{ role: "user", content: "hi" }], { numPredict: 1, timeoutMs: 180_000 }),
 			ollamaChat(o.baseUrl, o.smallModel, [{ role: "user", content: "hi" }], { numPredict: 1, timeoutMs: 180_000 }),
 		]);
 		this.loading = false;
@@ -574,6 +620,66 @@ BLOCKED = assistant correctly asked the user for missing info.`,
 		for (const model of [o.model, o.smallModel]) {
 			void fetch(`${o.baseUrl}/api/generate`, { method: "POST", body: JSON.stringify({ model, keep_alive: "30m" }) }).catch(() => {});
 		}
+	}
+
+	/**
+	 * Work-mode compaction: if the conversation is close to filling the context window, return a compaction
+	 * entry that keeps only the last few turns and summarizes the rest with the task board (goal, checked
+	 * steps, her notes). Returns null when there's room.
+	 */
+	private workModeCompaction(ctx: { contextEntries: Array<{ sourceEntry: { id: string }; messages: any[] }>; contextMessages: any[] }) {
+		const last = [...ctx.contextMessages].reverse().find((m) => m.role === "assistant");
+		const u = last?.usage ?? {};
+		const used = (u.input ?? 0) + (u.cacheRead ?? 0) + (u.cacheWrite ?? 0) + (u.output ?? 0);
+		const ranOutOfRoom = last?.stopReason === "length" && !(last.content ?? []).some((c: any) => c.type === "toolCall" || (c.type === "text" && c.text.trim()));
+		if (!ranOutOfRoom && used < this.cfg.ollama.contextWindow * 0.65) return null;
+		const withMessages = ctx.contextEntries.filter((e) => e.messages.length);
+		// Keep the last ~6 message entries, starting at one that opens a turn (not a lone tool result).
+		let keep = Math.max(0, withMessages.length - 6);
+		while (keep < withMessages.length && withMessages[keep].messages[0]?.role === "toolResult") keep++;
+		if (keep <= 0 || keep >= withMessages.length) return null;
+		const t = this.tasks.current!;
+		const summary = [
+			`(Earlier conversation compacted during work mode.)`,
+			`He approved a long task: ${t.goal}`,
+			`Steps:\n${t.steps.map((s, i) => `${s.done ? "[x]" : "[ ]"} ${i + 1}. ${s.text}`).join("\n")}`,
+			t.notes.length ? `Your notes so far:\n${t.notes.map((n) => `- ${n}`).join("\n")}` : "",
+		]
+			.filter(Boolean)
+			.join("\n\n");
+		this.emitEvent({ type: "repair", detail: `work mode: compacted context (${used} tokens used)` });
+		return { type: "compaction" as const, summary, firstKeptEntryId: withMessages[keep].sourceEntry.id };
+	}
+
+	/** He pressed ⏹ (or quit): end work mode and interrupt whatever step is running. */
+	async stopTask(): Promise<void> {
+		if (!this.tasks?.running) return;
+		this.tasks.stop("stopped");
+		this.emitEvent({ type: "task", task: this.tasks.snapshot() });
+		if (this.busy) await this.session.abort().catch(() => {});
+		this.emitEvent({ type: "say", text: "Okay, dừng nhé. Chị đã lưu lại tiến độ rồi.", mood: "neutral", proactive: false });
+	}
+
+	/**
+	 * A task is still running but nothing is happening (a step errored, the app restarted mid-task):
+	 * pick it back up. Called from the heartbeat, so an approved job doesn't silently stall.
+	 */
+	async resumeTask(): Promise<boolean> {
+		if (!this.tasks?.running || this.busy || this.loading) return false;
+		const next = this.tasks.nextStep();
+		this.grants.clear();
+		this.run = { kind: "user", userText: this.tasks.current!.goal, toolsUsed: [], autoContinues: 0, lastText: "", finalText: "" };
+		this.emitEvent({ type: "task", task: this.tasks.snapshot() });
+		try {
+			await this.session.sendCustomMessage(
+				{ customType: "work_mode", content: `[work mode] Resume the approved task. Next: ${next ? `step ${next.index} — ${next.text}` : "check the goal is met and finish"}.`, display: false },
+				{ triggerTurn: true },
+			);
+			await this.session.waitForIdle?.();
+		} catch (e) {
+			this.emitEvent({ type: "error", message: (e as Error).message });
+		}
+		return true;
 	}
 
 	/** Advance her needs by the clock and what he's doing (called every minute by the heartbeat). */

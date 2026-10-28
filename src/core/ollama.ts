@@ -14,7 +14,9 @@ export async function ollamaChat(
 			stream: false,
 			think: false,
 			format: opts.format,
-			options: { temperature: 0.2, num_ctx: opts.numCtx ?? 8192, num_predict: opts.numPredict },
+			// No num_ctx unless asked: a context size different from the one the model is loaded with makes
+			// Ollama reload the whole model, so side calls use the Modelfile's value like the chat does.
+			options: { temperature: 0.2, num_ctx: opts.numCtx, num_predict: opts.numPredict },
 			keep_alive: "30m",
 		}),
 		signal: AbortSignal.timeout(opts.timeoutMs ?? 90_000),

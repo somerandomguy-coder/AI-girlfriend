@@ -7,6 +7,9 @@ import { APP_ROOT, paths } from "./paths.js";
 const AUDIOCPP = join(APP_ROOT, "sidecars", "audiocpp");
 const VIENEU = join(AUDIOCPP, "models", "vieneu");
 const VOXCPM2 = join(AUDIOCPP, "models", "voxcpm2", "voxcpm2-q8_0.gguf");
+/** Speech recognition for the 🎙️ button: Qwen3-ASR-0.6B (Vietnamese + English, 30 languages). */
+export const ASR_MODEL = join(AUDIOCPP, "models", "qwen3-asr", "qwen3-asr-0.6b-q8_0.gguf");
+export const ASR_MODEL_ID = "qwen3-asr";
 const toPosix = (p: string) => p.replace(/\\/g, "/");
 
 export interface VoiceInfo {
@@ -63,7 +66,8 @@ export class Sidecars {
 	async start(): Promise<void> {
 		const vieneu = this.cfg.tts.engine === "vieneu" || this.cfg.tts.engine === "voxcpm2";
 		if (this.cfg.repair.useNeedle || vieneu) this.startPython();
-		if (vieneu && this.cfg.tts.vieneu.autostart) await this.startAudio();
+		// The same server also does speech recognition, so start it if either the voice or the mic needs it.
+		if ((vieneu || existsSync(ASR_MODEL)) && this.cfg.tts.vieneu.autostart) await this.startAudio();
 	}
 
 	private startPython(): void {
@@ -90,7 +94,9 @@ export class Sidecars {
 					device: 0,
 					threads: this.cfg.tts.vieneu.threads,
 					lazy_load: true,
-					max_loaded_models: 1,
+					// Voice + mic are both small (~0.2 + ~1.2 GB): keep both resident, or every spoken turn
+					// would unload one to load the other.
+					max_loaded_models: existsSync(ASR_MODEL) ? 2 : 1,
 					ui: true,
 					ui_management: false,
 					models: [
@@ -104,6 +110,9 @@ export class Sidecars {
 						},
 						...(this.cfg.tts.engine === "voxcpm2" && existsSync(VOXCPM2)
 							? [{ id: "voxcpm2", family: "voxcpm2", path: toPosix(VOXCPM2), task: "tts", mode: "offline", lazy: true }]
+							: []),
+						...(existsSync(ASR_MODEL)
+							? [{ id: ASR_MODEL_ID, family: "qwen3_asr", path: toPosix(ASR_MODEL), task: "asr", mode: "offline", lazy: true }]
 							: []),
 					],
 				},

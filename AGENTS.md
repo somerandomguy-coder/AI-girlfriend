@@ -37,6 +37,8 @@ changes, and explain what you changed in plain words.
   - the blocklist in `src/core/shell.ts`;
   - `allowedRoots`.
 - **Don't put personal data in the repo.** Their persona, memories, chat log and config stay in the data folder.
+- **Files may have Windows line endings (CRLF).** When editing with scripts, match on LF and write back in the
+  file's own style.
 - **Keep both front ends working:** `src/core` must not import Electron.
 - **Windows PowerShell 5.1 runs `setup.ps1`:**
   - keep it ASCII (no `→` / `—`);
@@ -48,7 +50,8 @@ changes, and explain what you changed in plain words.
 
 ```powershell
 npx tsc --noEmit -p .
-npx tsx scripts/repair-test.ts; npx tsx scripts/shell-test.ts; npx tsx scripts/markdown-test.ts; npx tsx scripts/needs-test.ts; npx tsx scripts/files-test.ts
+npx tsx scripts/repair-test.ts; npx tsx scripts/shell-test.ts; npx tsx scripts/markdown-test.ts; npx tsx scripts/needs-test.ts; npx tsx scripts/files-test.ts; npx tsx scripts/fsops-test.ts; npx tsx scripts/task-test.ts
+$env:MAI_HOME="$env:TEMP\mai-work"; npx tsx scripts/work-e2e.ts   # after changes to file tools or work mode
 node scripts/check-sprites.mjs <sprite folder>          # after sprite changes
 node --check src/app/renderer/pet.js                    # after renderer JS changes
 $env:MAI_HOME="$env:TEMP\mai-e2e"; npx tsx scripts/e2e.ts   # after brain/prompt/tool changes (needs Ollama running)

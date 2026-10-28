@@ -32,7 +32,7 @@ The setup is **incremental**: each step checks first and only does what's missin
 
    | VRAM | Brain | Voice |
    |---|---|---|
-   | 24 GB+ (`32gb`) | `gemma4:26b-a4b-it-qat` (MoE, fast), 32k context | VieNeu on CUDA + **VoxCPM2 expressive voice** |
+   | 24 GB+ (`32gb`) | `gemma4:12b`, 32k context (longer memory for long tasks) | VieNeu on CUDA + **VoxCPM2 expressive voice** |
    | 12–23 GB (`16gb`) | `gemma4:12b`, 16k context | VieNeu on CPU (keeps VRAM for the brain) |
    | 7–11 GB (`8gb`) | `qwen3.5:9b` | VieNeu on CPU |
    | less / no NVIDIA (`cpu`) | `qwen3.5:4b` (slow) | VieNeu on CPU |
@@ -98,12 +98,23 @@ Options: `setup.cmd -CheckOnly` (report only), `-Profile 16gb` (force a profile)
   - **VoxCPM2:** style-prompted emotion for big GPUs.
   - **Online fallback:** if a local voice is down, she uses the edge voice.
   - Speech starts sentence by sentence while she's still typing.
-- **Tools.** 22 of them:
+  - **Mic (🎙️):** local speech recognition with Qwen3-ASR (Vietnamese + English). Right-click the mic to switch
+    language.
+- **Work mode for long jobs.** For big jobs ("read all 40 reports and summarize them"), she asks permission with a
+  goal and step list. Once you approve, she keeps working step after step until it's done:
+  - a progress bar with ⏹ to stop;
+  - her notes survive a full context window and even a restart;
+  - she pauses instead of spinning if she gets stuck.
+- **Tools.** 30 of them:
   - memory and persona edits
   - calendar, todos and side quests (with automatic checks)
   - screen peek with the local vision model (opt-in)
   - system info and a "which model fits my GPU" cookbook
-  - reading files (PDF, Word, Excel, PowerPoint, images, code…)
+  - reading files (PDF, Word, Excel, PowerPoint, images, code…), by line range for text
+  - exploring folders: tree, find by name, search inside files (skips `node_modules`, `.venv`, `.git`, build output)
+  - precise editing like a coding agent: exact-text `edit_file`, `insert_text` next to a line, `write_file`
+    create/append. She never rewrites a whole file unless you asked, you approve every change with a diff
+    preview, and the original is backed up first (`.mai-companion\state\backups`)
   - moving files and PowerShell (behind your approval)
 
 ## Developer quick reference
@@ -111,7 +122,9 @@ Options: `setup.cmd -CheckOnly` (report only), `-Profile 16gb` (force a profile)
 ```powershell
 npm start               # build + run the desktop pet
 npm run tui             # same brain in the terminal (/poke /feed /todos /needs /history …)
-npx tsx scripts/repair-test.ts; npx tsx scripts/shell-test.ts; npx tsx scripts/markdown-test.ts; npx tsx scripts/needs-test.ts; npx tsx scripts/files-test.ts
+npx tsx scripts/repair-test.ts; npx tsx scripts/shell-test.ts; npx tsx scripts/markdown-test.ts; npx tsx scripts/needs-test.ts; npx tsx scripts/files-test.ts; npx tsx scripts/fsops-test.ts; npx tsx scripts/task-test.ts
+$env:MAI_HOME="$env:TEMP\mai-work"; npx tsx scripts/work-e2e.ts   # exploring, editing and a full long task with the real model
+npx tsx scripts/stt-test.ts                                     # mic round trip (needs Mai running)
 $env:MAI_HOME="$env:TEMP\mai-e2e"; npx tsx scripts/e2e.ts      # real-model scenarios in a throwaway profile
 npx electron scripts/screenshots/capture.cjs                   # regenerate docs/images
 ```

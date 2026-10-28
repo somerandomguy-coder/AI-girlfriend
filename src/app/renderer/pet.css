@@ -81,6 +81,18 @@ blockquote { margin: 2px 0; padding-left: 8px; border-left: 3px solid var(--pink
 .line.mai { background: #ffe3ee; }
 .line small { display: block; color: var(--muted); font-size: 10px; }
 
+#taskbar {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap; flex-shrink: 0;
+  background: var(--paper); border: 2px solid var(--pink-deep); border-radius: 12px; padding: 5px 8px; font-size: 12px;
+}
+#taskbar.hidden { display: none; }
+#taskbar.finished { border-color: var(--ink); }
+#task-text { flex: 1 1 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#task-progress { flex: 1; height: 6px; border-radius: 4px; background: rgba(42, 31, 45, .15); overflow: hidden; }
+#task-progress i { display: block; height: 100%; width: 0; background: var(--pink-deep); transition: width .5s ease; }
+#btn-stop-task { min-width: 0; padding: 0 8px; font-size: 12px; }
+body.mode-roam #taskbar { display: none; }
+
 #activity {
   align-self: center; font-size: 12px; color: #fff; background: rgba(42, 31, 45, .75);
   padding: 2px 10px; border-radius: 999px;

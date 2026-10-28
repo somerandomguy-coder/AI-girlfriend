@@ -1,85 +1,39 @@
+import { existsSync } from "node:fs";
 import type { Config } from "./config.js";
+import { ASR_MODEL, ASR_MODEL_ID } from "./sidecars.js";
 
 export interface TranscribeOptions {
+	/** Recognition language hint; "auto" lets the model decide (good for mixed Vietnamese/English). */
 	lang?: "vi" | "en" | "auto";
-	prompt?: string;
 }
 
+const LANGUAGE_NAME = { vi: "Vietnamese", en: "English" } as const;
+
 /**
- * Transcribes audio data to text with priority for Vietnamese and English.
- * 1. Tries OpenAI-compatible /v1/audio/transcriptions on the local audio.cpp server (port 8080).
- * 2. Tries configured OpenAI Whisper endpoint if available.
- * 3. Tries Python sidecar /transcribe endpoint.
+ * Speech → text for the 🎙️ button, using Qwen3-ASR on the local audio.cpp server.
+ * The pet window converts the recording to 16 kHz mono WAV first: that is the only format the server's
+ * transcription route accepts. Errors are thrown (not swallowed) so the bubble can say what went wrong.
  */
-export async function transcribeAudio(
-	audioBuffer: Buffer,
-	mimeType: string,
-	cfg: Config,
-	opts?: TranscribeOptions,
-): Promise<string> {
-	const lang = opts?.lang ?? "vi";
-
-	// 1. Try local audio server (audio.cpp or local whisper server on 8080)
-	const serverUrl = cfg.tts.vieneu.serverUrl.replace(/\/$/, "");
-	try {
-		const formData = new FormData();
-		const ext = mimeType.includes("webm") ? "webm" : mimeType.includes("wav") ? "wav" : "ogg";
-		const blob = new Blob([audioBuffer as any], { type: mimeType });
-		formData.append("file", blob, `voice.${ext}`);
-		formData.append("model", "whisper");
-		formData.append("language", lang === "vi" ? "vi" : "en");
-
-		const res = await fetch(`${serverUrl}/v1/audio/transcriptions`, {
-			method: "POST",
-			body: formData,
-			signal: AbortSignal.timeout(12000),
-		});
-		if (res.ok) {
-			const data = (await res.json()) as { text?: string };
-			if (data.text?.trim()) return data.text.trim();
-		}
-	} catch {
-		// Local endpoint not responding to transcription
+export async function transcribeAudio(wav: Buffer, cfg: Config, opts: TranscribeOptions = {}): Promise<string> {
+	if (!existsSync(ASR_MODEL)) {
+		throw new Error("Speech recognition isn't installed yet. Run setup.cmd (or scripts\\setup-vieneu.ps1) once.");
 	}
+	if (wav.length < 44 || wav.toString("ascii", 0, 4) !== "RIFF") throw new Error("Recording isn't a WAV file.");
+	const form = new FormData();
+	form.append("file", new Blob([new Uint8Array(wav)], { type: "audio/wav" }), "voice.wav");
+	form.append("model", ASR_MODEL_ID);
+	const lang = opts.lang ?? "auto";
+	if (lang !== "auto") form.append("language", LANGUAGE_NAME[lang]);
 
-	// 2. Try configured OpenAI-compatible STT endpoint if specified
-	if (cfg.tts.openai.baseUrl && cfg.tts.openai.baseUrl !== serverUrl) {
-		try {
-			const formData = new FormData();
-			const blob = new Blob([audioBuffer as any], { type: mimeType });
-			formData.append("file", blob, "voice.wav");
-			formData.append("model", "whisper-1");
-			formData.append("language", lang === "vi" ? "vi" : "en");
-
-			const res = await fetch(`${cfg.tts.openai.baseUrl.replace(/\/$/, "")}/v1/audio/transcriptions`, {
-				method: "POST",
-				body: formData,
-				signal: AbortSignal.timeout(15000),
-			});
-			if (res.ok) {
-				const data = (await res.json()) as { text?: string };
-				if (data.text?.trim()) return data.text.trim();
-			}
-		} catch {}
-	}
-
-	// 3. Try Python sidecar endpoint
+	const server = cfg.tts.vieneu.serverUrl.replace(/\/$/, "");
+	let res: Response;
 	try {
-		const res = await fetch(`http://127.0.0.1:${cfg.repair.needlePort}/transcribe`, {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({
-				audio: audioBuffer.toString("base64"),
-				mimeType,
-				lang,
-			}),
-			signal: AbortSignal.timeout(12000),
-		});
-		if (res.ok) {
-			const data = (await res.json()) as { text?: string };
-			if (data.text?.trim()) return data.text.trim();
-		}
-	} catch {}
-
-	return "";
+		// The first request loads the model (~1–3 s); later ones are fast.
+		res = await fetch(`${server}/v1/audio/transcriptions`, { method: "POST", body: form, signal: AbortSignal.timeout(60_000) });
+	} catch (e) {
+		throw new Error(`The voice server at ${server} isn't answering (${(e as Error).message}). Is Mai's voice server running?`);
+	}
+	if (!res.ok) throw new Error(`Speech recognition failed (HTTP ${res.status}): ${(await res.text()).slice(0, 200)}`);
+	const data = (await res.json()) as { text?: string };
+	return (data.text ?? "").trim();
 }

@@ -46,6 +46,8 @@ ${s.persona.read("MEMORY.md").replace(/^#.*\n/, "").trim()}
 - His messages start with (time · language). Reply in THAT language.
 - To act, CALL a tool. Never claim you did something (saved, moved, scheduled, checked) unless a tool result says so.
 - Never guess live facts. Anything about his PC (VRAM, RAM, disk), files, calendar or screen → call the tool first, then answer from its result.
+- Files: explore with folder_tree / find_files / search_files; read text with read_file start_line to get line numbers. To change a file, use edit_file (exact old_text) or insert_text. Never rewrite a whole existing file unless he asked; write_file is for new files or appending.
+- Big multi-step jobs (many files, long documents, "go through all of …"): don't rush or stop halfway. Ask with start_long_task (goal + steps); once he approves you'll keep working until it's done.
 - Learned a lasting fact about him, or made/received a promise? Call remember.
 - Change your own personality only when he asks or something meaningful happened (edit_persona, with a reason).
 - Messages starting with [HEARTBEAT] come from your own internal clock, not from him. Follow HEARTBEAT.md:
@@ -61,5 +63,5 @@ ${s.persona.read("HEARTBEAT.md").replace(/^#.*\n/, "").trim().replace(/^/gm, "  
 - ${s.screen.describe()}
 - ${s.calendar.describeUpcoming()}
 - ${s.quests.describe()}
-- ${s.todos.describe()}`;
+- ${s.todos.describe()}${s.tasks.running ? `\n\n${s.tasks.describe()}` : ""}`;
 }
