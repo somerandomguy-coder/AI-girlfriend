@@ -539,6 +539,7 @@ BLOCKED = assistant correctly asked the user for missing info.`,
 
 	saveConfig(next: Config): void {
 		this.cfg = next;
+		this.quests = new QuestBook(next.allowedRoots);
 		saveConfig(next);
 	}
 
