@@ -1,8 +1,4 @@
-import { execFile } from "node:child_process";
-import { existsSync, unlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import type { Config } from "./config.js";
-import { paths } from "./paths.js";
 
 export interface TranscribeOptions {
 	lang?: "vi" | "en" | "auto";
@@ -14,7 +10,6 @@ export interface TranscribeOptions {
  * 1. Tries OpenAI-compatible /v1/audio/transcriptions on the local audio.cpp server (port 8080).
  * 2. Tries configured OpenAI Whisper endpoint if available.
  * 3. Tries Python sidecar /transcribe endpoint.
- * 4. Falls back to Windows built-in speech recognition via PowerShell.
  */
 export async function transcribeAudio(
 	audioBuffer: Buffer,
@@ -29,7 +24,7 @@ export async function transcribeAudio(
 	try {
 		const formData = new FormData();
 		const ext = mimeType.includes("webm") ? "webm" : mimeType.includes("wav") ? "wav" : "ogg";
-		const blob = new Blob([audioBuffer], { type: mimeType });
+		const blob = new Blob([audioBuffer as any], { type: mimeType });
 		formData.append("file", blob, `voice.${ext}`);
 		formData.append("model", "whisper");
 		formData.append("language", lang === "vi" ? "vi" : "en");
@@ -51,7 +46,7 @@ export async function transcribeAudio(
 	if (cfg.tts.openai.baseUrl && cfg.tts.openai.baseUrl !== serverUrl) {
 		try {
 			const formData = new FormData();
-			const blob = new Blob([audioBuffer], { type: mimeType });
+			const blob = new Blob([audioBuffer as any], { type: mimeType });
 			formData.append("file", blob, "voice.wav");
 			formData.append("model", "whisper-1");
 			formData.append("language", lang === "vi" ? "vi" : "en");
