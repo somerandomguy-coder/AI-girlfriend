@@ -230,8 +230,13 @@ $P = $profiles[$Profile]
 
 # ---------------------------------------------------------------- app
 Step "App (Node + Electron)"
-if (Test-Path (Join-Path $Root "node_modules\electron")) { Ok "npm packages" } else {
-	Todo "npm packages"
+# Reinstall when an update changed the dependencies (package-lock.json newer than the installed tree),
+# so "git pull" + setup always ends up with the right packages.
+$lockFile = Join-Path $Root "package-lock.json"
+$installedLock = Join-Path $Root "node_modules\.package-lock.json"
+$depsCurrent = (Test-Path (Join-Path $Root "node_modules\electron")) -and (Test-Path $installedLock) -and ((Get-Item $installedLock).LastWriteTime -ge (Get-Item $lockFile).LastWriteTime)
+if ($depsCurrent) { Ok "npm packages" } else {
+	Todo "npm packages (install / update)"
 	if (-not $CheckOnly) { Push-Location $Root; npm install --no-fund --no-audit; Pop-Location; Ok "npm packages installed" }
 }
 $dist = Join-Path $Root "dist\app\main.js"
