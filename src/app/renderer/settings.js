@@ -107,7 +107,7 @@ $("btn-settings-clear-chat")?.addEventListener("click", async () => {
 const FIELDS = [
   ["Brain", [
     ["ollama.model", "Main model (Ollama tag)", "text"],
-    ["ollama.smallModel", "Small helper model", "text"],
+    ["ollama.judgeModel", "Goal-check model (Ollama decision model; empty = main model)", "text"],
     ["ollama.contextWindow", "Context window (tokens)", "number"],
     ["ollama.think", "Let her think before answering (slower)", "bool"],
     ["ollama.baseUrl", "Ollama URL", "text"],

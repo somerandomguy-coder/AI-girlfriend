@@ -8,8 +8,11 @@ export interface Config {
 		baseUrl: string;
 		/** Main brain: chat + tools + vision. */
 		model: string;
-		/** Cheap model for goal checks and summaries. */
-		smallModel: string;
+		/**
+		 * Goal-check judge: an Ollama decision model (needs Ollama 0.40.4+). Empty, missing or failing → her
+		 * own model judges instead, slower, so only on replies that look like claims or unfinished work.
+		 */
+		judgeModel: string;
 		contextWindow: number;
 		/** Let the model think before answering. Smarter, but several times slower on local GPUs. */
 		think: boolean;
@@ -97,7 +100,7 @@ export const DEFAULT_CONFIG: Config = {
 	ollama: {
 		baseUrl: "http://127.0.0.1:11434",
 		model: "mai-brain",
-		smallModel: "mai-helper",
+		judgeModel: "tev1:4b-q4_K_M",
 		contextWindow: 16384,
 		think: false,
 	},

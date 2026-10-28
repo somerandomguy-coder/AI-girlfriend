@@ -45,6 +45,21 @@ Once she works, the old big model can be deleted to free ~16 GB of disk:
 ollama rm gemma4:26b-a4b-it-qat
 ```
 
+## The 2026-10-29 update
+
+- **Ollama is upgraded** if it's older than 0.40.4. Setup opens Ollama's installer: click through it.
+- **New goal-check model:** `tev1:4b-q4_K_M` is downloaded (~2.8 GB). It's faster and more accurate than
+  the old helper ([BENCHMARKS.md](BENCHMARKS.md)).
+- **Bigger RAM cache:** Ollama's cache goes from 1 GB to 2 GB. This restarts Ollama once.
+
+The old helper models are no longer used. Once she works, delete them to free ~3.4 GB of disk. Skip the
+second line on 8 GB / CPU PCs, where `qwen3.5:4b` may be her brain:
+
+```powershell
+ollama rm mai-helper
+ollama rm qwen3.5:4b
+```
+
 ## If something goes wrong
 
 - `.\setup.cmd -CheckOnly` lists what's missing without changing anything.

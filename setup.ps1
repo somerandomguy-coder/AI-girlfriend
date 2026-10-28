@@ -153,7 +153,12 @@ Write-Host "  repo: $Root"
 Step "Tools"
 Need-Tool "git" "Git.Git" "Git (her memory is versioned with git)" { $true } { Install-Git-Direct }
 Need-Tool "node" "OpenJS.NodeJS.LTS" "Node.js 22+" { [int]((node -v) -replace "^v(\d+).*", '$1') -ge 22 } { Install-Node-Direct }
-Need-Tool "ollama" "Ollama.Ollama" "Ollama (runs the AI models)" { $true } { Install-Ollama-Direct }
+# 0.40.4+: her goal-check judge is an Ollama "decision" model (POST /v1/systemone), which older versions can't pull.
+function Ollama-Version {
+	$v = (ollama --version 2>&1 | Out-String)
+	if ($v -match '(\d+)\.(\d+)\.(\d+)') { [version]"$($matches[1]).$($matches[2]).$($matches[3])" } else { [version]"0.0.0" }
+}
+Need-Tool "ollama" "Ollama.Ollama" "Ollama 0.40.4+ (runs the AI models)" { (Ollama-Version) -ge [version]"0.40.4" } { Install-Ollama-Direct }
 Need-Tool "uv" "astral-sh.uv" "uv (Python for the helper sidecar)" { $true } { Install-Uv-Direct }
 
 # ---------------------------------------------------------------- hardware -> model profile
@@ -221,10 +226,12 @@ Ok "GPU: $gpu, $vram GB VRAM -> profile '$Profile'"
 $profiles = @{
 	# 24 GB+: same brain as 16 GB (gemma4:12b is plenty for a companion); the extra VRAM goes to a longer
 	# context for work mode and to the GPU voice (VieNeu on CUDA + VoxCPM2).
-	"32gb" = @{ main = @("gemma4:12b"); helper = "qwen3.5:4b"; ctx = 32768; voiceCuda = $true; expressive = $true }
-	"16gb" = @{ main = @("gemma4:12b"); helper = "qwen3.5:4b"; ctx = 16384; voiceCuda = $false }
-	"8gb"  = @{ main = @("qwen3.5:9b", "qwen3.5:4b"); helper = "qwen3.5:4b"; ctx = 12288; voiceCuda = $false }
-	"cpu"  = @{ main = @("qwen3.5:4b"); helper = "qwen3.5:4b"; ctx = 8192; voiceCuda = $false }
+	# judge: the goal-check decision model (3.9 GB VRAM, ~80 ms per check; scripts/bench/judge-bench.ts).
+	# Smaller cards have no room for it: empty means her own model judges, slower, on fewer replies.
+	"32gb" = @{ main = @("gemma4:12b"); judge = "tev1:4b-q4_K_M"; ctx = 32768; voiceCuda = $true; expressive = $true }
+	"16gb" = @{ main = @("gemma4:12b"); judge = "tev1:4b-q4_K_M"; ctx = 16384; voiceCuda = $false }
+	"8gb"  = @{ main = @("qwen3.5:9b", "qwen3.5:4b"); judge = ""; ctx = 12288; voiceCuda = $false }
+	"cpu"  = @{ main = @("qwen3.5:4b"); judge = ""; ctx = 8192; voiceCuda = $false }
 }
 $P = $profiles[$Profile]
 
@@ -248,12 +255,14 @@ if ((Test-Path $dist) -and ((Get-Item $dist).LastWriteTime -ge $newestSrc)) { Ok
 
 # ---------------------------------------------------------------- Ollama RAM limits
 # Ollama's runner (llama-server) keeps old conversations in system RAM: a prompt cache of up to 8 GB plus
-# up to 32 "context checkpoints" per chat. With Mai's changing prompts that grows to 10-15 GB of RAM even
-# though the model itself sits in VRAM. These llama.cpp settings cap it (measured: RAM stays ~2 GB, same
-# speed). They are read by every model Ollama starts, so Ollama is restarted once if they change.
+# up to 32 "context checkpoints" per chat: 10-15 GB of RAM even though the model itself sits in VRAM.
+# Mai has one conversation, so she only needs enough cache to get it back after a side call (goal check,
+# screen look) used the model: 2 GB does that (next turn 1.5 s instead of 3.4 s; RAM ~3 GB instead of ~10).
+# Measured with scripts/bench/cache-bench.mjs. Read by every model Ollama starts, so Ollama is restarted
+# once if they change.
 Step "Ollama memory limits"
 function Ollama-Up { try { Invoke-RestMethod "http://127.0.0.1:11434/api/version" -TimeoutSec 2 | Out-Null; $true } catch { $false } }
-$ramLimits = @{ "LLAMA_ARG_CACHE_RAM" = "1024"; "LLAMA_ARG_CTX_CHECKPOINTS" = "4" }
+$ramLimits = @{ "LLAMA_ARG_CACHE_RAM" = "2048"; "LLAMA_ARG_CTX_CHECKPOINTS" = "4" }
 $changed = $false
 foreach ($k in $ramLimits.Keys) {
 	if ([Environment]::GetEnvironmentVariable($k, "User") -eq $ramLimits[$k]) { Ok "$k = $($ramLimits[$k])"; continue }
@@ -302,9 +311,20 @@ function Pull-First($candidates, [switch]$AllowDownload = $true) {
 }
 $mainCandidates = if ($Model) { @($Model) } else { $P.main }
 $mainTag = Pull-First $mainCandidates -AllowDownload:(-not $SkipModels)
-$helperTag = Pull-First @($P.helper) -AllowDownload:(-not $SkipModels)
-# Wrap them with the context size Mai expects (cheap: no extra download).
-foreach ($pair in @(@("mai-brain", $mainTag), @("mai-helper", $helperTag))) {
+$judgeTag = $P.judge
+if ($judgeTag) {
+	if ($have -contains $judgeTag) { Ok "goal-check model $judgeTag" }
+	elseif ($SkipModels) { Say "warn" "goal-check model $judgeTag not downloaded (-SkipModels): her own model will judge" "DarkYellow"; $judgeTag = "" }
+	else {
+		Todo "goal-check model $judgeTag (download, ~3 GB)"
+		if (-not $CheckOnly) {
+			ollama pull $judgeTag
+			if ($LASTEXITCODE -eq 0) { Ok "goal-check model $judgeTag" } else { Say "warn" "could not pull ${judgeTag}, her own model will judge" "DarkYellow"; $judgeTag = "" }
+		}
+	}
+}
+# Wrap the brain with the context size Mai expects (cheap: no extra download). The judge needs no wrapper.
+foreach ($pair in @(,@("mai-brain", $mainTag))) {
 	$name, $from = $pair
 	$want = "FROM $from`nPARAMETER num_ctx $($P.ctx)`n"
 	# The generated Modelfile is per machine, so it lives in the data folder, not the git repo (editing
@@ -367,7 +387,9 @@ $cfg = if (Test-Path $cfgFile) { Get-Content $cfgFile -Raw | ConvertFrom-Json } 
 function Ensure-Obj($o, $name) { if (-not ($o.PSObject.Properties.Name -contains $name)) { $o | Add-Member -NotePropertyName $name -NotePropertyValue ([pscustomobject]@{}) }; $o.$name }
 function Set-Val($o, $name, $value) { if ($o.PSObject.Properties.Name -contains $name) { $o.$name = $value } else { $o | Add-Member -NotePropertyName $name -NotePropertyValue $value } }
 $ol = Ensure-Obj $cfg "ollama"
-Set-Val $ol "model" "mai-brain"; Set-Val $ol "smallModel" "mai-helper"; Set-Val $ol "contextWindow" $P.ctx
+Set-Val $ol "model" "mai-brain"; Set-Val $ol "judgeModel" $judgeTag; Set-Val $ol "contextWindow" $P.ctx
+# Older setups had a "mai-helper" model for this; it's no longer used.
+if ($ol.PSObject.Properties.Name -contains "smallModel") { $ol.PSObject.Properties.Remove("smallModel") }
 $tts = Ensure-Obj $cfg "tts"
 Set-Val $tts "engine" $voiceEngine
 if ($voiceEngine -eq "vieneu") { $vn = Ensure-Obj $tts "vieneu"; Set-Val $vn "backend" $(if ($wantCuda) { "cuda" } else { "cpu" }) }

@@ -55,6 +55,7 @@ $env:MAI_HOME="$env:TEMP\mai-work"; npx tsx scripts/work-e2e.ts   # after change
 node scripts/check-sprites.mjs <sprite folder>          # after sprite changes
 node --check src/app/renderer/pet.js                    # after renderer JS changes
 $env:MAI_HOME="$env:TEMP\mai-e2e"; npx tsx scripts/e2e.ts   # after brain/prompt/tool changes (needs Ollama running)
+npx tsx scripts/bench/judge-bench.ts so/tev1:4b-q4_K_M      # after goal-check changes; see docs/BENCHMARKS.md
 ```
 
 Visual changes can be checked without a screen session: `npx electron scripts/screenshots/capture.cjs` renders

@@ -27,7 +27,7 @@ That downloads Mai into `%USERPROFILE%\Mai` and runs the setup script. **Already
 The setup is **incremental**: each step checks first and only does what's missing, so you can re-run it any time
 (after an update, after a failed download, on a new GPU). It:
 
-1. Installs Git, Node.js, Ollama and uv with `winget` if they're missing.
+1. Installs Git, Node.js, Ollama (0.40.4+) and uv with `winget` if they're missing or too old.
 2. Reads your GPU and picks a model profile:
 
    | VRAM | Brain | Voice |
@@ -36,6 +36,9 @@ The setup is **incremental**: each step checks first and only does what's missin
    | 12–23 GB (`16gb`) | `gemma4:12b`, 16k context | VieNeu on CPU (keeps VRAM for the brain) |
    | 7–11 GB (`8gb`) | `qwen3.5:9b` | VieNeu on CPU |
    | less / no NVIDIA (`cpu`) | `qwen3.5:4b` (slow) | VieNeu on CPU |
+
+   12 GB+ also get `tev1:4b-q4_K_M` (3.9 GB), a decision model that checks every reply in ~80 ms
+   ([benchmarks](docs/BENCHMARKS.md)).
 
 3. Downloads the models and builds the app.
 4. Sets up the Python helper (tool-call repair + Vietnamese phonemizer) and the local voice.
@@ -91,6 +94,8 @@ Options: `setup.cmd -CheckOnly` (report only), `-Profile 16gb` (force a profile)
 - **Agent loop that doesn't quit halfway.** Broken tool-call JSON from small models is repaired: first with
   `jsonrepair`, then by [needle](https://github.com/cactus-compute/needle), a 35 MB grammar-constrained
   tool-calling model. A goal check makes her finish what she started, and she can't claim facts she didn't look up.
+  The check is an Ollama *decision model*: it scores "done / unfinished / made up / needs his input" in one
+  pass instead of writing text ([benchmarks](docs/BENCHMARKS.md)).
 - **Memory you can audit.** `SOUL.md`, `USER.md`, `MEMORY.md` and `HEARTBEAT.md` live in a private git repo in
   `%USERPROFILE%\.mai-companion\persona`.
 - **Voice.**

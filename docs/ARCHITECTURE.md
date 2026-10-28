@@ -9,14 +9,14 @@
                            │ events
             ┌──────────────▼────────── Brain (src/core/brain.ts) ─────┐
             │ pi AgentSession (Ollama via OpenAI API)                  │
-            │  hooks: per-turn system prompt · tool-call repair ·      │
+            │  hooks: system prompt + "right now" note · tool repair · │
             │         goal check (keep going / don't fabricate)        │
             │ tools.ts (30 tools) · persona (git) · mood · needs ·     │
             │ calendar · todos · quests · screen · heartbeat           │
             └──────┬───────────────────────────┬──────────────────────┘
                    │                           │
            Ollama :11434              sidecars (sidecars.ts)
-           mai-brain / mai-helper     ├ Python :8765  needle repair + sea-g2p phonemizer
+           mai-brain + tev1 judge     ├ Python :8765  needle repair + sea-g2p phonemizer
                                       └ audio.cpp :8080  VieNeu (+ VoxCPM2)
 ```
 
@@ -25,9 +25,12 @@
 ## A turn
 
 1. **He types.** `Brain.chat()` adds a timestamp and language hint, then `session.prompt()`.
-2. **`before_agent_start`** rebuilds the system prompt (`prompt.ts`) from:
-   - SOUL / USER / MEMORY / HEARTBEAT;
-   - a "Right now" block: time, 7-day dates, mood, needs, screen, calendar, quests, todos.
+2. **`before_agent_start`** builds the prompt (`prompt.ts`) in two parts:
+   - the system prompt: SOUL / USER / MEMORY / HEARTBEAT and the rules. It only changes when she edits
+     those, so Ollama keeps the whole chat after it cached;
+   - a "[Right now]" note (time, 7-day dates, mood, needs, screen, calendar, quests, todos, work mode). The
+     `context` hook attaches it to his newest message on every LLM call of the run, never to older ones.
+     This made turns ~2× faster ([BENCHMARKS.md](BENCHMARKS.md)).
 3. **The model streams.** Text deltas go to the bubble, and finished sentences become `utterance` events. The
    main process synthesizes them in order and the pet plays them back to back.
 4. **`message_end`.** If the model wrote a tool call as *text*, `repair.ts` turns it back into a real one, using
@@ -36,8 +39,11 @@
    shows a dialog; the answer is Allow once / Allow all for this request / Deny.
 6. **`agent_before_settle`.** The run is checked before it ends:
    - if she said nothing, she's told to answer;
-   - if she promised work she didn't do, or stated facts without the tool that checks them, the small model
-     judges and she's nudged to continue (at most `agent.maxAutoContinues`).
+   - if he denied an approval, nothing more happens: it's his call;
+   - otherwise the judge (`judge.ts`) looks at the request, the tools used and her reply. It's the decision
+     model `ollama.judgeModel` via `POST /v1/systemone` on every reply (~80 ms). With no decision model, her
+     own model judges, but only replies that make claims, promise work or used tools. CONTINUE or
+     FABRICATED nudges her to go on (at most `agent.maxAutoContinues`).
 
 ## Work mode (long tasks)
 

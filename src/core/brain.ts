@@ -16,8 +16,10 @@ import { type Mood, MoodEngine, MOODS } from "./mood.js";
 import { ollamaChat, ollamaUp } from "./ollama.js";
 import { ensureDirs, paths } from "./paths.js";
 import { PersonaStore } from "./persona.js";
+import { decisionVerdict, JUDGE_FORMAT, judgeGate, judgeMessages, parseVerdict, shouldNudge, type Verdict } from "./judge.js";
+export { looksLikeClaim } from "./judge.js";
 import { Needs, type NeedsState } from "./needs.js";
-import { buildSystemPrompt } from "./prompt.js";
+import { buildNowNote, buildSystemPrompt, withNowNote } from "./prompt.js";
 import { TodoList } from "./todos.js";
 import { TaskBoard } from "./longtask.js";
 import { QuestBook } from "./quests.js";
@@ -57,16 +59,11 @@ interface RunInfo {
 	/** Text of the most recent assistant message, even if empty. */
 	finalText: string;
 	fabricationNudged?: boolean;
+	/** He said no to an approval in this run: what's left is his call, so the goal check stays quiet. */
+	denied?: boolean;
 }
 
 const SILENT = /^\s*(\[[a-z]+\]\s*)?(SILENT|HEARTBEAT_OK)\W*$/i;
-const PROMISE = /\b(i'?ll|i will|let me|going to|one sec|hold on)\b|để chị|chị sẽ|đợi chị|chờ chị|chị đi/i;
-
-/** Does a reply contain something a tool could have verified: a number, or a claim that an action was done? */
-export function looksLikeClaim(text: string): boolean {
-	return /\d|\b(done|saved|moved|added|scheduled|checked|deleted|removed|opened|set up|reminder set)\b|đã (lưu|chuyển|ghi|thêm|xóa|xoá|kiểm tra|mở|đặt|dọn|nhắc)|xong rồi/i.test(text);
-}
-
 /** Splits a leading [mood] tag off text; tolerant of a tag that's still streaming in. */
 export function splitMood(text: string): { mood?: Mood; body: string } {
 	// Gemma sometimes leaks a "thought" channel marker before the reply.
@@ -125,6 +122,8 @@ export class Brain extends EventEmitter {
 	/** Work mode stall detection: tools run since the last continuation, and continuations in a row without any. */
 	private workToolsThisTurn = 0;
 	private workIdleTurns = 0;
+	/** Set once the decision-model judge fails; from then on her own model judges (see goalCheck). */
+	private decisionJudgeFailed = false;
 	/** True while the models are being loaded into memory (she yawns meanwhile). */
 	loading = true;
 	quests!: QuestBook;
@@ -186,6 +185,7 @@ export class Brain extends EventEmitter {
 				if (this.grants.has(req.kind)) return true;
 				const answer = await this.approver(req).catch(() => "deny" as const);
 				if (answer === "all") this.grants.add(req.kind);
+				if (answer === "deny" && this.run) this.run.denied = true;
 				return answer !== "deny";
 			},
 		};
@@ -225,7 +225,7 @@ export class Brain extends EventEmitter {
 							compat: { supportsDeveloperRole: false, supportsStore: false, maxTokensField: "max_tokens" },
 							// Thinking models (gemma4, qwen3.5) otherwise think at length even at thinkingLevel "off",
 							// burning the token budget and sometimes ending with no reply at all.
-							models: [o.model, o.smallModel].map((id) => ({
+							models: [o.model].map((id) => ({
 								id,
 								contextWindow: o.contextWindow,
 								maxTokens: 2048,
@@ -347,7 +347,13 @@ export class Brain extends EventEmitter {
 
 	/** pi extension hooks: dynamic prompt, tool-call repair, and the don't-stop-halfway goal check. */
 	private installHooks(pi: ExtensionAPI, s: Services): void {
-		pi.on("before_agent_start", () => ({ systemPrompt: buildSystemPrompt(s) }));
+		// The note is fixed for the whole run so every tool-loop call shares the same cached prefix.
+		let nowNote = "";
+		pi.on("before_agent_start", () => {
+			nowNote = buildNowNote(s);
+			return { systemPrompt: buildSystemPrompt(s) };
+		});
+		pi.on("context", (event) => ({ messages: withNowNote(event.messages, nowNote) }));
 
 		pi.on("message_end", async (event) => {
 			const msg = event.message as any;
@@ -419,18 +425,11 @@ export class Brain extends EventEmitter {
 					continue: true,
 				};
 			}
-			// A 4B judge is only trustworthy on narrow questions, so it only gets two:
-			//  - no tool ran at all → did she state live facts / claim actions anyway? (FABRICATED, once per run)
-			//  - tools ran and her last words promise more → is there unfinished work? (CONTINUE)
-			const promised = PROMISE.test(run.finalText);
-			// Only replies that contain something checkable (numbers, "done/moved/saved…") can be fabricated;
-			// asking the judge about plain chat produced false alarms.
-			const askFabricated = !run.toolsUsed.length && !run.fabricationNudged && looksLikeClaim(run.finalText);
-			if (!askFabricated && !promised) return;
+			if (run.denied) return;
+			const gate = judgeGate(run.toolsUsed, run.finalText, run.fabricationNudged, this.decisionJudgeOk() ? "all" : "wide");
+			if (!gate) return;
 			const verdict = await this.goalCheck(run).catch(() => null);
-			if (!verdict) return;
-			if (verdict.verdict === "FABRICATED" && !askFabricated) return;
-			if (verdict.verdict !== "CONTINUE" && verdict.verdict !== "FABRICATED") return;
+			if (!verdict || !shouldNudge(gate, verdict.verdict)) return;
 			if (verdict.verdict === "FABRICATED") run.fabricationNudged = true;
 			run.autoContinues++;
 			this.emitEvent({ type: "repair", detail: `goal check: ${verdict.verdict.toLowerCase()} (${verdict.reason})` });
@@ -442,30 +441,26 @@ export class Brain extends EventEmitter {
 		});
 	}
 
+	/** The decision-model judge is configured and hasn't failed (not pulled, Ollama too old). */
+	private decisionJudgeOk(): boolean {
+		return !!this.cfg.ollama.judgeModel && !this.decisionJudgeFailed;
+	}
+
 	/** Cheap second opinion: did the run actually finish what he asked? */
-	private async goalCheck(run: RunInfo): Promise<{ verdict: "DONE" | "CONTINUE" | "BLOCKED" | "FABRICATED"; reason: string }> {
-		const out = await ollamaChat(
-			this.cfg.ollama.baseUrl,
-			this.cfg.ollama.smallModel,
-			[
-				{
-					role: "system",
-					content: `You audit a desktop assistant. Available tools: ${this.toolSpecs.map((t) => t.name).join(", ")}.
-Reply JSON {"verdict":"DONE"|"CONTINUE"|"BLOCKED"|"FABRICATED","reason":"<short>"}.
-DONE = request handled, or it was just chat/feelings/opinions.
-CONTINUE = assistant promised or started an action but did not complete it with tools.
-FABRICATED = assistant stated live facts (hardware numbers, files, calendar entries, what is on screen) or claimed to have done an action, but the matching tool was NOT used.
-BLOCKED = assistant correctly asked the user for missing info.`,
-				},
-				{
-					role: "user",
-					content: `Request: ${run.userText.slice(0, 800)}\nTools used: ${run.toolsUsed.join(", ") || "none"}\nAssistant's final reply: ${run.lastText.slice(0, 800)}`,
-				},
-			],
-			{ format: "json", timeoutMs: 30_000 },
-		);
-		const parsed = JSON.parse(out);
-		return { verdict: String(parsed.verdict).toUpperCase() as any, reason: String(parsed.reason ?? "") };
+	private async goalCheck(run: RunInfo): Promise<{ verdict: Verdict; reason: string }> {
+		const o = this.cfg.ollama;
+		const tools = this.toolSpecs.map((t) => t.name);
+		const turn = { request: run.userText, toolsUsed: run.toolsUsed, reply: run.lastText };
+		if (this.decisionJudgeOk()) {
+			try {
+				return await decisionVerdict(o.baseUrl, o.judgeModel, tools, turn);
+			} catch (e) {
+				this.decisionJudgeFailed = true;
+				this.emitEvent({ type: "repair", detail: `goal-check model ${o.judgeModel} unavailable, her own model judges instead: ${(e as Error).message}` });
+			}
+		}
+		const out = await ollamaChat(o.baseUrl, o.model, judgeMessages(tools, turn), { format: JUDGE_FORMAT, timeoutMs: 30_000 });
+		return parseVerdict(out);
 	}
 
 	private wireEvents(): void {
@@ -608,7 +603,7 @@ BLOCKED = assistant correctly asked the user for missing info.`,
 		const o = this.cfg.ollama;
 		await Promise.allSettled([
 			ollamaChat(o.baseUrl, o.model, [{ role: "user", content: "hi" }], { numPredict: 1, timeoutMs: 180_000 }),
-			ollamaChat(o.baseUrl, o.smallModel, [{ role: "user", content: "hi" }], { numPredict: 1, timeoutMs: 180_000 }),
+			this.pingJudge(180_000),
 		]);
 		this.loading = false;
 		this.emitEvent({ type: "state", state: "idle" });
@@ -617,8 +612,19 @@ BLOCKED = assistant correctly asked the user for missing info.`,
 	/** Ollama unloads idle models after 5 minutes; refresh both so replies stay fast while she's running. */
 	keepWarm(): void {
 		const o = this.cfg.ollama;
-		for (const model of [o.model, o.smallModel]) {
-			void fetch(`${o.baseUrl}/api/generate`, { method: "POST", body: JSON.stringify({ model, keep_alive: "30m" }) }).catch(() => {});
+		void fetch(`${o.baseUrl}/api/generate`, { method: "POST", body: JSON.stringify({ model: o.model, keep_alive: "30m" }) }).catch(() => {});
+		void this.pingJudge(30_000);
+	}
+
+	/** Decision models can't /api/generate; a tiny real question loads them (and finds out early if one is missing). */
+	private async pingJudge(timeoutMs: number): Promise<void> {
+		if (!this.decisionJudgeOk()) return;
+		const o = this.cfg.ollama;
+		try {
+			await decisionVerdict(o.baseUrl, o.judgeModel, [], { request: "hi", toolsUsed: [], reply: "hi" }, timeoutMs);
+		} catch (e) {
+			this.decisionJudgeFailed = true;
+			this.emitEvent({ type: "repair", detail: `goal-check model ${o.judgeModel} unavailable, her own model judges instead: ${(e as Error).message}` });
 		}
 	}
 

@@ -60,11 +60,12 @@ Settings → Voice. Engines, best first:
 
 ## Models
 
-Setup creates two Ollama models:
-- **`mai-brain`**: the chat model, with vision for screen peeks.
-- **`mai-helper`**: a small model for quick checks.
-
-Each is a stock model wrapped with a context size; see `ollama\*.Modelfile`.
+Setup uses two Ollama models:
+- **`mai-brain`**: the chat model, with vision for screen peeks. It's a stock model wrapped with a context
+  size; see `%USERPROFILE%\.mai-companion\ollama\mai-brain.Modelfile`.
+- **`tev1:4b-q4_K_M`** (12 GB+ VRAM): the goal-check judge, an Ollama decision model. Settings → *Goal-check
+  model* takes any decision-capable tag. Empty means her own model judges, slower and on fewer replies. To
+  compare candidates: `npx tsx scripts/bench/judge-bench.ts so/<tag>` ([BENCHMARKS.md](BENCHMARKS.md)).
 
 - **Try a different brain:** `ollama pull <tag>`, then either set *Main model* in Settings, or point
   `ollama\mai-brain.Modelfile` at it and run `ollama create mai-brain -f ollama\mai-brain.Modelfile`.

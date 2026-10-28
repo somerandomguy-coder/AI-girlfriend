@@ -50,7 +50,7 @@ window.mai = {
 	}),
 	// settings window
 	getConfig: async () => ({
-		ollama: { model: "mai-brain", smallModel: "mai-helper", contextWindow: 16384, think: false, baseUrl: "http://127.0.0.1:11434" },
+		ollama: { model: "mai-brain", judgeModel: "tev1:4b-q4_K_M", contextWindow: 16384, think: false, baseUrl: "http://127.0.0.1:11434" },
 		heartbeat: { enabled: true, intervalMinutes: 20, maxProactivePerDay: 12, quietHours: { start: 1, end: 8 }, spontaneity: 0.35 },
 		screen: { watchWindows: true, allowScreenshots: false, blocklist: ["1password", "bank"] },
 		tts: { engine: "vieneu", voiceEn: "en-US-AvaMultilingualNeural", voiceVi: "vi-VN-HoaiMyNeural", vieneu: { voice: "truc_ly", backend: "cpu", threads: 6, autostart: true }, voxcpm2: { voiceRef: "" }, openai: { baseUrl: "", model: "", voice: "" } },

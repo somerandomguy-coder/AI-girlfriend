@@ -11,7 +11,11 @@ anything. Run `setup.cmd` to fix it.
 
 ### She says "Ollama is not reachable"
 Start Ollama (Start menu → Ollama), wait a few seconds, then restart Mai. `ollama list` in a terminal should
-show `mai-brain` and `mai-helper`. If they're missing, run `setup.cmd`.
+show `mai-brain` (and `tev1:4b-q4_K_M` on 12 GB+ cards). If they're missing, run `setup.cmd`.
+
+### "goal-check model … unavailable" in the log
+The decision model isn't downloaded, or Ollama is older than 0.40.4. She still works: her own model judges
+instead. Run `setup.cmd` to upgrade Ollama and download it.
 
 ### Replies are slow
 - Right after start she yawns while the models load; the first reply after that should take a few seconds.
@@ -49,5 +53,6 @@ still in the renamed folder.
 
 That is Ollama's runner caching old conversations in system RAM: a prompt cache of up to 8 GB plus up to
 32 "context checkpoints" per chat. The model itself is still in VRAM. `setup.cmd` caps it with two user
-environment variables (`LLAMA_ARG_CACHE_RAM=1024`, `LLAMA_ARG_CTX_CHECKPOINTS=4`) and restarts Ollama. In
-tests, RAM stayed around 2 GB with no speed difference. To undo it, delete those two variables and restart Ollama.
+environment variables (`LLAMA_ARG_CACHE_RAM=2048`, `LLAMA_ARG_CTX_CHECKPOINTS=4`) and restarts Ollama. In
+tests, RAM went from ~9.6 GB to ~2.9 GB at the same speed ([BENCHMARKS.md](BENCHMARKS.md)). Smaller caps make
+her slower after screen peeks. To undo it, delete those two variables and restart Ollama.
