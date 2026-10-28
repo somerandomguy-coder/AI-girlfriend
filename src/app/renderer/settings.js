@@ -222,8 +222,122 @@ $("sprite-save").addEventListener("click", async () => {
 $("open-sprites").addEventListener("click", () => window.mai.openPath("sprites"));
 $("open-data").addEventListener("click", () => window.mai.openPath("data"));
 
+// ---------- mic device selection & live testing ----------
+const micSelect = $("mic-device-select");
+const btnTestMic = $("btn-test-mic");
+const micMeterContainer = $("mic-meter-container");
+const micMeterBar = $("mic-meter-bar");
+const micMeterPct = $("mic-meter-pct");
+
+let testAudioContext = null;
+let testAudioStream = null;
+let testAnalyser = null;
+let testAnimFrame = null;
+
+async function loadMicDevices() {
+  if (!micSelect) return;
+  const currentVal = micSelect.value || localStorage.getItem("mai_mic_device_id") || "";
+  micSelect.innerHTML = "";
+  const optDef = document.createElement("option");
+  optDef.value = "";
+  optDef.textContent = "Default Microphone (System Default)";
+  micSelect.appendChild(optDef);
+
+  try {
+    if (navigator.mediaDevices?.enumerateDevices) {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const audioInputs = devices.filter((d) => d.kind === "audioinput");
+      let idx = 1;
+      for (const d of audioInputs) {
+        const opt = document.createElement("option");
+        opt.value = d.deviceId;
+        opt.textContent = d.label || `Microphone ${idx++}`;
+        if (d.deviceId === currentVal) opt.selected = true;
+        micSelect.appendChild(opt);
+      }
+    }
+  } catch (err) {
+    console.warn("Could not list audio devices:", err);
+  }
+}
+
+if (micSelect) {
+  micSelect.addEventListener("change", () => {
+    localStorage.setItem("mai_mic_device_id", micSelect.value);
+    if (testAudioStream) {
+      stopMicTest();
+      void startMicTest();
+    }
+  });
+}
+
+function stopMicTest() {
+  if (testAnimFrame) cancelAnimationFrame(testAnimFrame);
+  testAnimFrame = null;
+  if (testAudioStream) {
+    testAudioStream.getTracks().forEach((t) => t.stop());
+    testAudioStream = null;
+  }
+  if (testAudioContext) {
+    testAudioContext.close().catch(() => {});
+    testAudioContext = null;
+  }
+  if (btnTestMic) btnTestMic.textContent = "Test Mic 🎙️";
+  if (micMeterContainer) micMeterContainer.style.display = "none";
+  if (micMeterBar) micMeterBar.style.width = "0%";
+  if (micMeterPct) micMeterPct.textContent = "0%";
+}
+
+async function startMicTest() {
+  try {
+    const deviceId = micSelect ? micSelect.value : "";
+    const constraints = {
+      audio: deviceId ? { deviceId: { exact: deviceId } } : true,
+    };
+    testAudioStream = await navigator.mediaDevices.getUserMedia(constraints);
+    testAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+    testAnalyser = testAudioContext.createAnalyser();
+    testAnalyser.fftSize = 256;
+    const source = testAudioContext.createMediaStreamSource(testAudioStream);
+    source.connect(testAnalyser);
+
+    if (btnTestMic) btnTestMic.textContent = "Stop Test ⏹️";
+    if (micMeterContainer) micMeterContainer.style.display = "flex";
+
+    const dataArray = new Uint8Array(testAnalyser.frequencyBinCount);
+    function updateMeter() {
+      if (!testAnalyser) return;
+      testAnalyser.getByteFrequencyData(dataArray);
+      let sum = 0;
+      for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+      const avg = sum / dataArray.length;
+      const pct = Math.min(100, Math.round((avg / 128) * 100));
+      if (micMeterBar) micMeterBar.style.width = `${pct}%`;
+      if (micMeterPct) micMeterPct.textContent = `${pct}%`;
+      testAnimFrame = requestAnimationFrame(updateMeter);
+    }
+    updateMeter();
+    // After mic access is granted, re-enumerate devices to populate human-readable names
+    await loadMicDevices();
+  } catch (err) {
+    stopMicTest();
+    alert("Could not access microphone: " + err.message);
+  }
+}
+
+if (btnTestMic) {
+  btnTestMic.addEventListener("click", () => {
+    if (testAudioStream) {
+      stopMicTest();
+    } else {
+      void startMicTest();
+    }
+  });
+}
+
 (async () => {
   await loadPersona();
   await loadConfig();
   await loadSprites();
+  await loadMicDevices();
 })();

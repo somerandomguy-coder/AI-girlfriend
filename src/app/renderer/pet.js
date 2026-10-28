@@ -482,7 +482,11 @@ async function startSTT() {
 
 async function startMediaRecorder() {
   try {
-    audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const savedId = localStorage.getItem("mai_mic_device_id") || "";
+    const constraints = {
+      audio: savedId ? { deviceId: { exact: savedId } } : true,
+    };
+    audioStream = await navigator.mediaDevices.getUserMedia(constraints);
     audioChunks = [];
     const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
       ? "audio/webm;codecs=opus"
