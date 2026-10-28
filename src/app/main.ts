@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, screen, shell, Tray } from "electron";
 import { Brain, type BrainEvent } from "../core/brain.js";
-import type { Config } from "../core/config.js";
+import { type Config, loadConfig } from "../core/config.js";
 import { Heartbeat } from "../core/heartbeat.js";
 import { APP_ROOT, paths } from "../core/paths.js";
 import { PERSONA_FILES, type PersonaFile } from "../core/persona.js";
@@ -273,7 +273,12 @@ function registerIpc(): void {
 		if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
 	});
 
-	ipcMain.handle("get-config", () => brain.cfg);
+	ipcMain.handle("get-config", () => {
+		try {
+			brain.cfg = loadConfig();
+		} catch {}
+		return brain.cfg;
+	});
 	ipcMain.handle("save-config", (_e, cfg: Config) => {
 		brain.saveConfig(cfg);
 		speaker = makeSpeaker(cfg);
