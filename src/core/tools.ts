@@ -366,12 +366,18 @@ export function buildTools(s: Services): ToolDefinition<TSchema, unknown>[] {
 			limit: Type.Optional(Type.Number()),
 		}),
 		async execute(_id, p) {
-			if (!isInside(p.path, s.cfg.allowedRoots)) throw new Error(`Not allowed: ${p.path}`);
+			const targetPath = p.path.trim().replace(/^["']|["']$/g, "");
+			if (!isInside(targetPath, s.cfg.allowedRoots)) {
+				throw new Error(`Not allowed: ${targetPath}. Allowed folders: ${s.cfg.allowedRoots.join(", ")}`);
+			}
+			if (!existsSync(targetPath)) {
+				throw new Error(`Folder not found: ${targetPath}`);
+			}
 			const re = p.pattern ? new RegExp(`^${p.pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")}$`, "i") : null;
-			const items = readdirSync(p.path, { withFileTypes: true })
+			const items = readdirSync(targetPath, { withFileTypes: true })
 				.filter((d) => !re || re.test(d.name))
 				.map((d) => {
-					const full = join(p.path, d.name);
+					const full = join(targetPath, d.name);
 					let st;
 					try {
 						st = statSync(full);
@@ -382,7 +388,7 @@ export function buildTools(s: Services): ToolDefinition<TSchema, unknown>[] {
 				})
 				.filter((x): x is NonNullable<typeof x> => !!x)
 				.sort((a, b) => b.modified.localeCompare(a.modified));
-			return json({ path: p.path, total: items.length, items: items.slice(0, p.limit ?? 30) });
+			return json({ path: targetPath, total: items.length, items: items.slice(0, p.limit ?? 30) });
 		},
 	});
 
@@ -397,13 +403,14 @@ export function buildTools(s: Services): ToolDefinition<TSchema, unknown>[] {
 			question: Type.Optional(Type.String({ description: "For images: what you want to know" })),
 		}),
 		async execute(_id, p) {
-			if (!existsSync(p.path)) throw new Error(`File not found: ${p.path}. Use list_folder to find the exact name.`);
-			if (isSecretPath(p.path)) throw new Error("That file holds secrets or passwords; I don't open those.");
-			if (!isInside(p.path, s.cfg.allowedRoots)) {
-				const ok2 = await s.approve({ kind: "read_file", summary: `Read "${basename(p.path)}"`, detail: p.path, why: "It's outside the folders she's allowed to look in." });
+			const targetPath = p.path.trim().replace(/^["']|["']$/g, "");
+			if (!existsSync(targetPath)) throw new Error(`File not found: ${targetPath}. Use list_folder to find the exact name.`);
+			if (isSecretPath(targetPath)) throw new Error("That file holds secrets or passwords; I don't open those.");
+			if (!isInside(targetPath, s.cfg.allowedRoots)) {
+				const ok2 = await s.approve({ kind: "read_file", summary: `Read "${basename(targetPath)}"`, detail: targetPath, why: "It's outside the folders she's allowed to look in." });
 				if (!ok2) return ok("He didn't let me read that file.");
 			}
-			const r = await readAnyFile(p.path, { offset: p.offset, question: p.question }, s.describeImage);
+			const r = await readAnyFile(targetPath, { offset: p.offset, question: p.question }, s.describeImage);
 			return ok(r.text);
 		},
 	});
@@ -419,20 +426,22 @@ export function buildTools(s: Services): ToolDefinition<TSchema, unknown>[] {
 			why: Type.Optional(Type.String({ description: "One short sentence for him: why move it" })),
 		}),
 		async execute(_id, p) {
-			for (const x of [p.source, p.destination]) if (!isInside(x, s.cfg.allowedRoots)) throw new Error(`Not allowed: ${x}`);
-			if (!existsSync(p.source)) throw new Error(`Source not found: ${p.source}`);
-			const dest = existsSync(p.destination) && statSync(p.destination).isDirectory() ? join(p.destination, basename(p.source)) : p.destination;
+			const src = p.source.trim().replace(/^["']|["']$/g, "");
+			const destTarget = p.destination.trim().replace(/^["']|["']$/g, "");
+			for (const x of [src, destTarget]) if (!isInside(x, s.cfg.allowedRoots)) throw new Error(`Not allowed: ${x}`);
+			if (!existsSync(src)) throw new Error(`Source not found: ${src}`);
+			const dest = existsSync(destTarget) && statSync(destTarget).isDirectory() ? join(destTarget, basename(src)) : destTarget;
 			if (existsSync(dest)) throw new Error(`Destination already exists: ${dest}`);
 			const approved = await s.approve({
 				kind: "move_file",
-				summary: `Move "${basename(p.source)}"`,
-				detail: `From: ${p.source}
+				summary: `Move "${basename(src)}"`,
+				detail: `From: ${src}
 To:   ${dest}`,
 				why: p.why ?? "She wants to tidy this up.",
 			});
-			if (!approved) return ok(`He did not approve moving ${basename(p.source)}. Leave it where it is unless he asks again.`);
-			renameSync(p.source, dest);
-			return ok(`Moved ${p.source} → ${dest}`);
+			if (!approved) return ok(`He did not approve moving ${basename(src)}. Leave it where it is unless he asks again.`);
+			renameSync(src, dest);
+			return ok(`Moved ${src} → ${dest}`);
 		},
 	});
 

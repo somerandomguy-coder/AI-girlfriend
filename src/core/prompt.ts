@@ -55,6 +55,7 @@ ${s.persona.read("HEARTBEAT.md").replace(/^#.*\n/, "").trim().replace(/^/gm, "  
 # Right now
 - Local time: ${nowLine()}
 - Dates: ${weekStrip()}
+- Allowed folders: ${s.cfg.allowedRoots.join(", ")}
 - ${s.mood.describe()}
 - ${s.needs.describe()}
 - ${s.screen.describe()}

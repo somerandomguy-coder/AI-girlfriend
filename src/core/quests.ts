@@ -31,9 +31,13 @@ export interface Quest {
 const FILE = () => join(paths.state, "quests.json");
 
 export function isInside(p: string, roots: string[]): boolean {
+	if (!p || !roots || !roots.length) return false;
 	const clean = (s: string) => resolve(s.trim().replace(/^["']|["']$/g, "")).toLowerCase();
 	const full = clean(p);
-	return roots.some((r) => full.startsWith(clean(r)));
+	return roots.some((r) => {
+		const root = clean(r);
+		return full === root || full.startsWith(root + "\\") || full.startsWith(root + "/");
+	});
 }
 
 function globToRegex(pattern: string): RegExp {
