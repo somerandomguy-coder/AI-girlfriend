@@ -153,9 +153,10 @@ export class Brain extends EventEmitter {
 	}
 
 	private services(): Services {
+		const self = this;
 		return {
 			get cfg() {
-				return this.cfg;
+				return self.cfg;
 			},
 			persona: this.persona,
 			mood: this.mood,
@@ -165,11 +166,11 @@ export class Brain extends EventEmitter {
 			onPlannerChanged: () => this.emitEvent({ type: "planner_changed" }),
 			onNeedsChanged: () => this.emitEvent({ type: "needs", needs: this.needs.state }),
 			get quests() {
-				return this.quests;
+				return self.quests;
 			},
 			screen: this.screen,
 			describeImage: (b64, q) =>
-				ollamaChat(this.cfg.ollama.baseUrl, this.cfg.ollama.model, [{ role: "user", content: `${q} Answer in 2 sentences.`, images: [b64] }]),
+				ollamaChat(self.cfg.ollama.baseUrl, self.cfg.ollama.model, [{ role: "user", content: `${q} Answer in 2 sentences.`, images: [b64] }]),
 			onPersonaChanged: () => this.emitEvent({ type: "persona_changed" }),
 			approve: async (req) => {
 				if (this.grants.has(req.kind)) return true;
